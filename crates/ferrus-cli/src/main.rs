@@ -6,8 +6,9 @@
 //! message rather than silently doing nothing. As the engine phases land, the
 //! `write` command is fleshed out behind the same interface.
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand};
+use ferrus_core::device::{SafeTarget, format_size, list_all_devices, list_writable_candidates};
 use ferrus_core::windows::{TweakOptions, labconfig_keys};
 
 /// Cross-platform bootable USB creator.
@@ -103,18 +104,63 @@ fn main() -> Result<()> {
 }
 
 fn cmd_list() -> Result<()> {
-    // TODO(phase1): call ferrus_core::device::list_writable_candidates() and
-    // print a table (path, model, size). Enumeration is not implemented yet.
-    bail!("device enumeration is not implemented yet (Phase 1)");
+    let devices = list_writable_candidates().context("failed to enumerate devices")?;
+    if devices.is_empty() {
+        println!("No removable target devices found.");
+        return Ok(());
+    }
+
+    println!("{:<14} {:>9}  {:<6} {}", "DEVICE", "SIZE", "BUS", "MODEL");
+    for dev in &devices {
+        println!(
+            "{:<14} {:>9}  {:<6} {}",
+            dev.path.display(),
+            format_size(dev.size_bytes),
+            dev.bus,
+            dev.model.as_deref().unwrap_or("(unknown model)"),
+        );
+        if let Some(id) = &dev.stable_id {
+            println!("{:<14} by-id: {id}", "");
+        }
+    }
+    Ok(())
 }
 
 fn cmd_write(args: &WriteArgs) -> Result<()> {
     let opts = TweakOptions::from(&args.tweaks);
 
+    // Route the requested target through the single safety checkpoint. Even a
+    // rejected device is fed to `acquire` so the user gets the precise reason.
+    let device = list_all_devices()
+        .context("failed to enumerate devices")?
+        .into_iter()
+        .find(|dev| dev.path == args.target)
+        .ok_or_else(|| {
+            anyhow!(
+                "{} is not a block device on this host (run `ferrus list`)",
+                args.target.display()
+            )
+        })?;
+    let target = SafeTarget::acquire(device, &args.target, args.dry_run)
+        .context("target rejected by the safety checkpoint")?;
+    let device = target.device();
+
     println!("Ferrus write plan");
     println!("  source : {}", args.image.display());
-    println!("  target : {}", args.target.display());
-    println!("  mode   : {}", if args.dry_run { "dry-run" } else { "REAL WRITE" });
+    println!(
+        "  target : {} ({}, {})",
+        device.path.display(),
+        format_size(device.size_bytes),
+        device.model.as_deref().unwrap_or("unknown model"),
+    );
+    println!(
+        "  mode   : {}",
+        if target.is_dry_run() {
+            "dry-run"
+        } else {
+            "REAL WRITE"
+        }
+    );
 
     let keys = labconfig_keys(&opts);
     if keys.is_empty() {
@@ -129,7 +175,7 @@ fn cmd_write(args: &WriteArgs) -> Result<()> {
         println!("           local account: {name}");
     }
 
-    if args.dry_run {
+    if target.is_dry_run() {
         println!("\nDry-run: no device was touched.");
         return Ok(());
     }
