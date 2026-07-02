@@ -39,18 +39,25 @@ this ADR is accepted, `ferrus-gui` carries no GUI dependency.
 
 ## Decision
 
-**egui** (via `eframe`).
+**iced.**
 
 Rationale:
 
-- Ferrus is a small desktop utility. **Immediate mode** maps naturally onto the
-  write flow: a background worker performs the burn while the UI polls and
-  redraws progress each frame — no retained-widget state to keep in sync with a
-  long-running operation.
-- Widest adoption of the candidates, so the largest pool of examples and
-  contributors.
-- **MIT/Apache-2.0** licensing, cleanly compatible with GPL-3.0-or-later and,
-  crucially, non-viral — it does not constrain a future relicensing.
+- The product goal is a **modern, good-looking** UI. iced gives direct control
+  over rendering and theming (custom widgets, styling) via its wgpu renderer,
+  without embedding a WebView — so we can pursue a polished look without the
+  weight and attack surface of a browser runtime.
+- Its Elm-like, retained/reactive model with an explicit command/subscription
+  system fits a core that runs long, cancellable operations off the UI thread
+  and streams progress back.
+- Pure-Rust, MIT-licensed — cleanly compatible with GPL-3.0-or-later and
+  non-viral, so it does not constrain a future relicensing.
+
+Fallback:
+
+- **egui** (via `eframe`) — kept as the alternative to reach for if an
+  ultra-fast MVP becomes the priority again; immediate mode is quicker to
+  prototype but gives less control over a refined visual design.
 
 Rejected:
 
@@ -58,16 +65,17 @@ Rejected:
   use, which would foreclose a future relicensing of Ferrus. Ruled out on that
   basis despite its polish.
 
-Fallback:
-
-- **iced** — kept as the alternative to reach for if a need for a more polished,
-  retained-mode UX emerges later.
+**To be reconfirmed at the start of Phase 5.** No GUI implementation happens
+before then; `ferrus-gui` stays a minimal window shell until Phase 5.
 
 ## Consequences
 
-- `ferrus-gui` depends on `eframe`/`egui`; GUI-specific code stays inside that
-  crate, and all engine logic remains in `ferrus-core` so the front-end can be
-  swapped (e.g. for iced) with limited blast radius.
-- Immediate-mode redraw means the burn worker must run off the UI thread and
-  communicate progress over a channel; the UI reads it each frame. This aligns
-  with the `progress::ProgressSink` design in `ferrus-core`.
+- `ferrus-gui` will depend on `iced`; GUI-specific code stays inside that crate,
+  and all engine logic remains in `ferrus-core` so the front-end can still be
+  swapped (e.g. for egui) with limited blast radius.
+- iced's command/subscription model means the burn worker runs off the UI thread
+  and reports progress over a channel/subscription. This aligns with the
+  `progress::ProgressSink` design in `ferrus-core`.
+- The current Phase 0 shell uses `eframe` only as a throwaway placeholder; it is
+  replaced by iced when Phase 5 begins. The dependency is not switched now
+  (no GUI work before Phase 5).
