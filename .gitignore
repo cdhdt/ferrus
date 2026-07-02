@@ -1,0 +1,27 @@
+# Rust
+/target
+**/*.rs.bk
+# Cargo.lock IS committed (application, not library) — do not ignore it.
+
+# Local test media (large binaries, never committed)
+*.iso
+*.img
+*.wim
+*.swm
+*.esd
+# ...but keep vendored bootloader assets:
+!res/uefi/*.img
+/scratch/
+
+# Env / secrets
+.env
+*.local
+
+# Editor / OS
+/.idea/
+/.vscode/
+.DS_Store
+*.swp
+
+# Personal working docs (not part of the project)
+/ferrus-bootstrap-prompt.md

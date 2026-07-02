@@ -1,0 +1,20 @@
+[package]
+name = "ferrus-gui"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Graphical front-end for Ferrus (egui/eframe — see ADR-0001)."
+
+[[bin]]
+name = "ferrus-gui"
+path = "src/main.rs"
+
+[dependencies]
+# GUI framework: egui via eframe (ADR-0001). Version resolved against the
+# pinned 1.94.1 toolchain, not hardcoded from memory.
+eframe = "0.32.3"
+# NOTE: ferrus-core is intentionally NOT a dependency yet — this crate is a
+# window shell only (no flow logic, no engine calls) until Phase 5.

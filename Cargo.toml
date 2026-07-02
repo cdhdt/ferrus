@@ -1,0 +1,23 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/ferrus-core",
+    "crates/ferrus-cli",
+    "crates/ferrus-gui",
+]
+
+[workspace.package]
+edition = "2024"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/cdhdt/ferrus"
+authors = ["Ferrus contributors"]
+rust-version = "1.85"
+
+[workspace.dependencies]
+# Error handling: thiserror in the library, anyhow in the binaries (see CLAUDE.md).
+thiserror = "2"
+anyhow = "1"
+# CLI argument parsing.
+clap = { version = "4", features = ["derive"] }
+# Internal crates.
+ferrus-core = { path = "crates/ferrus-core" }

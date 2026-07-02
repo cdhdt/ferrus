@@ -1,0 +1,5 @@
+# Pins the toolchain so every contributor gets a reproducible setup with the
+# lints and formatter Ferrus expects (see CLAUDE.md "Code conventions").
+[toolchain]
+channel = "1.94.1"
+components = ["clippy", "rustfmt"]

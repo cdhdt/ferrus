@@ -1,0 +1,35 @@
+UEFI:NTFS — vendored bootloader
+================================
+
+This directory is the intended home of the UEFI:NTFS bootloader image that
+Ferrus writes to a small FAT helper partition so that UEFI firmware can boot an
+NTFS main partition (the strategy Ferrus uses for Windows install media).
+
+Status
+------
+NOT YET VENDORED. Phase 0 ships this NOTICE only; the actual binary asset is
+added in Phase 3, together with a checked-in hash and the details below filled
+in. See docs/adr/0002-uefi-ntfs-vendoring.md.
+
+Provenance (to be completed when the asset is added)
+----------------------------------------------------
+- Upstream project : UEFI:NTFS by Pete Batard (pbatard)
+- Upstream source  : https://github.com/pbatard/uefi-ntfs
+- Version / commit : <TODO: pin exact release/commit>
+- Asset file       : <TODO: e.g. uefi-ntfs.img>
+- SHA-256          : <TODO: hash of the vendored asset>
+
+License and GPL compliance
+--------------------------
+UEFI:NTFS is licensed under the GNU General Public License v3.0. Ferrus is
+GPL-3.0-or-later, so redistribution is compatible. To satisfy the GPL when we
+ship the binary, this directory MUST also carry:
+
+  1. A verbatim copy of the UEFI:NTFS license (the repo-root LICENSE is GPLv3
+     and covers it, but keep the upstream copyright notice here too).
+  2. A reference to the corresponding source (the upstream URL and pinned
+     commit above), i.e. a clear written offer / pointer to the exact source
+     the binary was built from.
+
+Do not add the binary without completing the provenance block and the license
+copy in the same commit.
