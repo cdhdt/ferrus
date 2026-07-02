@@ -21,6 +21,31 @@ request.
   messages). International open-source project.
 - **`Cargo.lock` is committed** (Ferrus is an application, not a library).
 
+## Working method
+
+This process applies to Phase 1 and every phase after it.
+
+- **One phase at a time.** A phase is done only when `cargo build` and
+  `cargo test` are green. Then: write a short summary and STOP. Never start the
+  next phase without an explicit instruction.
+- **Spec-first for domain-heavy modules** (`device`, `partition`, `boot`,
+  `windows`): the spec under `docs/specs/` is written BEFORE the code and is the
+  contract the code must satisfy. A spec captures the WHY and the BEHAVIOR
+  (invariants, refusal cases, pitfalls), not a line-by-line paraphrase of the
+  code — that only rots and lies.
+- **Safety invariants are encoded in the type system where possible, and are
+  ALWAYS covered by tests** — including the refusal cases, not just the happy
+  path.
+- **Never hardcode system values or mechanisms from memory** (sysfs layouts,
+  Windows registry keys, `autounattend.xml` schema, dependency versions).
+  Verify against a current source; when unsure, leave an explicit `TODO` and
+  flag it in the end-of-phase report rather than inventing something.
+- **Conventions are non-negotiable** (see "Code conventions"): `thiserror` in
+  the library, `anyhow` in the binaries, no `unwrap`/`expect` in the library,
+  `clippy --all-targets -- -D warnings`, `fmt`, doc-comments on every public
+  item, platform abstraction via traits + `cfg`.
+- **Atomic, descriptive commits.**
+
 ## How the Windows "magic" works
 
 - Tweaks are **file drops, NOT binary patching**:
