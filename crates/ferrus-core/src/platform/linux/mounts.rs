@@ -125,3 +125,57 @@ pub(super) fn build_system_disk_set(mounts: &str, swaps: &str, fs: &dyn BlockFs)
 
     disks
 }
+
+/// Mountpoints of every `/proc/mounts` entry whose source physically resides on
+/// `disk` (following the same slaves-walking resolution). Used to unmount a
+/// target's partitions before writing.
+pub(super) fn mountpoints_backed_by(mounts: &str, disk: &str, fs: &dyn BlockFs) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in mounts.lines() {
+        let mut fields = line.split_whitespace();
+        let (Some(source), Some(mountpoint)) = (fields.next(), fields.next()) else {
+            continue;
+        };
+        if !source.starts_with("/dev/") {
+            continue;
+        }
+        if let Some(name) = fs.dev_to_block_name(source) {
+            let mut disks = BTreeSet::new();
+            collect_backing_disks(&name, fs, &mut disks, 0);
+            if disks.contains(disk) {
+                out.push(unescape_octal(mountpoint));
+            }
+        }
+    }
+    out
+}
+
+/// Decode the octal escapes `/proc/mounts` uses in path fields (`\040` = space,
+/// `\011` = tab, `\012` = newline, `\134` = backslash). Without this, a stick
+/// mounted at a path containing a space would fail to unmount.
+pub(super) fn unescape_octal(field: &str) -> String {
+    let mut out = String::with_capacity(field.len());
+    let mut chars = field.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        // Try to read exactly three octal digits after the backslash.
+        let rest = chars.as_str();
+        let octal: String = rest.chars().take(3).collect();
+        if octal.len() == 3
+            && octal.bytes().all(|b| b.is_ascii_digit() && b < b'8')
+            && let Ok(code) = u8::from_str_radix(&octal, 8)
+        {
+            out.push(code as char);
+            // Consume the three digits we just decoded.
+            for _ in 0..3 {
+                chars.next();
+            }
+        } else {
+            out.push('\\');
+        }
+    }
+    out
+}

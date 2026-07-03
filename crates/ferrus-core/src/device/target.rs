@@ -144,4 +144,12 @@ impl SafeTarget {
     pub fn is_dry_run(&self) -> bool {
         self.dry_run
     }
+
+    /// Build a target directly, bypassing the checkpoint. **Tests only** — it
+    /// exists so the write orchestration (which requires a `SafeTarget`) can be
+    /// exercised without real hardware.
+    #[cfg(test)]
+    pub(crate) fn new_for_test(device: Device, dry_run: bool) -> Self {
+        Self { device, dry_run }
+    }
 }

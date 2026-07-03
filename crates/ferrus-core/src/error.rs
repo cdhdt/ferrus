@@ -52,6 +52,31 @@ pub enum Error {
     #[error("missing file: {0}")]
     MissingFile(PathBuf),
 
+    /// A privileged operation was attempted without the required privileges
+    /// (writing to a block device needs root — see ADR-0003).
+    #[error("insufficient privileges: {0}")]
+    PrivilegeRequired(String),
+
+    /// The source image does not fit on the target device.
+    #[error("image is larger than the target device ({image_bytes} B > {device_bytes} B)")]
+    ImageTooLarge {
+        /// Size of the source image in bytes.
+        image_bytes: u64,
+        /// Capacity of the target device in bytes.
+        device_bytes: u64,
+    },
+
+    /// The target device is in use and could not be opened exclusively.
+    #[error("device is busy (still mounted or held by another process): {0}")]
+    DeviceBusy(PathBuf),
+
+    /// Post-write verification found the device contents differ from the image.
+    #[error("verification failed: device differs from image at byte {offset}")]
+    VerifyMismatch {
+        /// Byte offset of the first difference.
+        offset: u64,
+    },
+
     /// The operation, or the current platform target, is not implemented yet.
     #[error("not implemented: {0}")]
     Unsupported(String),

@@ -10,6 +10,7 @@
 
 mod mounts;
 mod sysfs;
+mod write;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -90,11 +91,7 @@ impl Backend for LinuxBackend {
     }
 
     fn is_system_or_critical(&self, device_path: &Path) -> Result<bool> {
-        let Some(name) = device_path.file_name() else {
-            return Ok(false);
-        };
-        let name = name.to_string_lossy().into_owned();
-        Ok(current_system_disks().contains(&name))
+        Ok(disk_is_system_or_critical(device_path))
     }
 }
 
@@ -103,6 +100,15 @@ fn current_system_disks() -> std::collections::BTreeSet<String> {
     let mounts = fs::read_to_string("/proc/mounts").unwrap_or_default();
     let swaps = fs::read_to_string("/proc/swaps").unwrap_or_default();
     build_system_disk_set(&mounts, &swaps, &RealBlockFs)
+}
+
+/// Whether the whole disk at `device_path` currently backs the system or a
+/// critical mount. Shared by both the enumeration and write backends.
+pub(super) fn disk_is_system_or_critical(device_path: &Path) -> bool {
+    match device_path.file_name() {
+        Some(name) => current_system_disks().contains(&name.to_string_lossy().into_owned()),
+        None => false,
+    }
 }
 
 /// Read a sysfs file and trim it, returning `None` on any error.

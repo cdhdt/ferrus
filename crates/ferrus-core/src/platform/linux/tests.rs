@@ -4,10 +4,11 @@
 //! string fixtures, and the system-disk resolution runs against a fake
 //! [`BlockFs`](super::mounts::BlockFs) modeling a real LUKS-on-NVMe host.
 
-use super::mounts::{BlockFs, build_system_disk_set};
+use super::mounts::{BlockFs, build_system_disk_set, mountpoints_backed_by, unescape_octal};
 use super::sysfs::{
     bus_from_syspath, flag_is_true, is_virtual_name, pick_stable_id, size_from_sectors,
 };
+use super::write::parse_effective_uid;
 use crate::device::Bus;
 
 // --- sysfs pure helpers ---------------------------------------------------
@@ -110,13 +111,16 @@ impl BlockFs for FakeBlockFs {
     }
 
     fn is_partition(&self, name: &str) -> bool {
-        matches!(name, "nvme0n1p1" | "nvme0n1p2" | "nvme0n1p3" | "sdz1")
+        matches!(
+            name,
+            "nvme0n1p1" | "nvme0n1p2" | "nvme0n1p3" | "sdz1" | "sdz2"
+        )
     }
 
     fn parent_disk(&self, name: &str) -> Option<String> {
         Some(match name {
             "nvme0n1p1" | "nvme0n1p2" | "nvme0n1p3" => "nvme0n1".to_owned(),
-            "sdz1" => "sdz".to_owned(),
+            "sdz1" | "sdz2" => "sdz".to_owned(),
             _ => return None,
         })
     }
@@ -149,4 +153,37 @@ fn swap_device_marks_its_disk() {
     let swaps = "Filename\tType\tSize\tUsed\tPriority\n/dev/nvme0n1p3 partition 8388604 0 -2\n";
     let set = build_system_disk_set(mounts, swaps, &FakeBlockFs);
     assert!(set.contains("nvme0n1"));
+}
+
+// --- write-path helpers ---------------------------------------------------
+
+#[test]
+fn effective_uid_is_the_second_uid_field() {
+    let status = "Name:\tferrus\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\n";
+    assert_eq!(parse_effective_uid(status), Some(1000));
+    assert_eq!(parse_effective_uid("Uid:\t0\t0\t0\t0"), Some(0));
+    assert_eq!(parse_effective_uid("no uid line here"), None);
+}
+
+#[test]
+fn octal_escapes_are_decoded() {
+    assert_eq!(unescape_octal("/mnt/plain"), "/mnt/plain");
+    assert_eq!(unescape_octal(r"/run/media/My\040Stick"), "/run/media/My Stick");
+    assert_eq!(unescape_octal(r"/a\011b"), "/a\tb");
+    // A lone backslash not starting a valid escape is left as-is.
+    assert_eq!(unescape_octal(r"/a\z"), r"/a\z");
+}
+
+#[test]
+fn mountpoints_backed_by_finds_target_partitions() {
+    let mounts = "\
+/dev/sdz1 /run/media/My\\040Stick vfat rw 0 0
+/dev/sdz2 /mnt/data ext4 rw 0 0
+/dev/nvme0n1p1 /boot/efi vfat rw 0 0
+tmpfs /tmp tmpfs rw 0 0
+";
+    let mps = mountpoints_backed_by(mounts, "sdz", &FakeBlockFs);
+    assert_eq!(mps, vec!["/run/media/My Stick".to_owned(), "/mnt/data".to_owned()]);
+    // A disk with nothing mounted yields nothing.
+    assert!(mountpoints_backed_by(mounts, "sdq", &FakeBlockFs).is_empty());
 }

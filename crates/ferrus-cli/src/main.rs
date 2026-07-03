@@ -6,12 +6,17 @@
 //! message rather than silently doing nothing. As the engine phases land, the
 //! `write` command is fleshed out behind the same interface.
 
-use anyhow::{Context, Result, anyhow, bail};
+use std::io::Write;
+
+use anyhow::{Context, Result, anyhow};
 use clap::{Args, Parser, Subcommand};
+use ferrus_core::copy::raw_copy;
 use ferrus_core::device::{
     LARGE_TARGET_THRESHOLD_BYTES, SafeTarget, format_size, list_all_devices,
     list_writable_candidates,
 };
+use ferrus_core::progress::{ProgressSink, Stage};
+use ferrus_core::source::RawImage;
 use ferrus_core::windows::{TweakOptions, labconfig_keys};
 
 /// Cross-platform bootable USB creator.
@@ -52,6 +57,10 @@ struct WriteArgs {
     /// Describe what would happen without touching any device.
     #[arg(long)]
     dry_run: bool,
+
+    /// After writing, read the device back and compare it to the image.
+    #[arg(long)]
+    verify: bool,
 
     #[command(flatten)]
     tweaks: TweakArgs,
@@ -154,7 +163,9 @@ fn cmd_list(args: &ListArgs) -> Result<()> {
 }
 
 fn cmd_write(args: &WriteArgs) -> Result<()> {
-    let opts = TweakOptions::from(&args.tweaks);
+    // Validate the image up front (opaque byte stream — no ISO parsing yet).
+    let image = RawImage::open(&args.image)
+        .with_context(|| format!("cannot use image {}", args.image.display()))?;
 
     // Route the requested target through the single safety checkpoint. Even a
     // rejected device is fed to `acquire` so the user gets the precise reason.
@@ -172,8 +183,21 @@ fn cmd_write(args: &WriteArgs) -> Result<()> {
         .context("target rejected by the safety checkpoint")?;
     let device = target.device();
 
-    println!("Ferrus write plan");
-    println!("  source : {}", args.image.display());
+    // Raw copy does not apply Windows install tweaks; be explicit if asked.
+    let opts = TweakOptions::from(&args.tweaks);
+    if !labconfig_keys(&opts).is_empty() || opts.local_account.is_some() {
+        eprintln!(
+            "note: Windows install tweaks are ignored by a raw image copy \
+             (that path lands in Phase 3-4)."
+        );
+    }
+
+    println!("Ferrus raw write");
+    println!(
+        "  source : {} ({})",
+        image.path().display(),
+        format_size(image.size_bytes())
+    );
     println!(
         "  target : {} ({}, {})",
         device.path.display(),
@@ -181,36 +205,42 @@ fn cmd_write(args: &WriteArgs) -> Result<()> {
         device.model.as_deref().unwrap_or("unknown model"),
     );
     println!(
-        "  mode   : {}",
-        if target.is_dry_run() {
-            "dry-run"
-        } else {
-            "REAL WRITE"
-        }
+        "  mode   : {}{}",
+        if target.is_dry_run() { "dry-run" } else { "REAL WRITE" },
+        if args.verify { ", verify" } else { "" },
     );
 
-    let keys = labconfig_keys(&opts);
-    if keys.is_empty() {
-        println!("  tweaks : none");
-    } else {
-        println!("  tweaks : LabConfig bypass keys:");
-        for key in &keys {
-            println!("           {} = {}", key.name, key.dword);
+    let mut progress = CliProgress::default();
+    raw_copy(&image, &target, args.verify, &mut progress).context("write failed")?;
+    Ok(())
+}
+
+/// Minimal terminal progress renderer.
+#[derive(Default)]
+struct CliProgress;
+
+impl ProgressSink for CliProgress {
+    fn stage(&mut self, stage: Stage) {
+        println!("[{stage:?}]");
+    }
+
+    fn advance(&mut self, done: u64, total: Option<u64>) {
+        let Some(total) = total.filter(|t| *t > 0) else {
+            return;
+        };
+        let pct = done.saturating_mul(100) / total;
+        print!(
+            "\r  {pct:3}%  {} / {}",
+            format_size(done),
+            format_size(total)
+        );
+        let _ = std::io::stdout().flush();
+        if done >= total {
+            println!();
         }
     }
-    if let Some(name) = &opts.local_account {
-        println!("           local account: {name}");
-    }
 
-    if target.is_dry_run() {
-        println!("\nDry-run: no device was touched.");
-        return Ok(());
+    fn message(&mut self, text: &str) {
+        println!("  {text}");
     }
-
-    // Guard: real writes are not implemented, so we must not pretend to work.
-    // This keeps the interface honest until the engine phases land.
-    bail!(
-        "real writes are not implemented yet (Phases 2-4). Re-run with --dry-run \
-         to preview the plan."
-    );
 }

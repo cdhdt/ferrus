@@ -1115,6 +1115,8 @@ dependencies = [
 name = "ferrus-core"
 version = "0.0.0"
 dependencies = [
+ "libc",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 

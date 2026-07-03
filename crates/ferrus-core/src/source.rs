@@ -3,10 +3,76 @@
 //! Before writing anything, Ferrus inspects the source image to decide the
 //! strategy: a generic ISO can often be copied as-is, whereas a Windows install
 //! ISO needs the NTFS + UEFI:NTFS treatment and enables the Windows tweaks.
+//!
+//! Phase 2 only needs to treat the image as an opaque byte stream: validate it
+//! exists, is readable, and is non-empty, and expose its size and a reader (see
+//! [`RawImage`]). Full ISO9660/UDF parsing and Windows detection land with
+//! [`inspect`] in Phase 3.
 
+use std::fs::File;
 use std::path::{Path, PathBuf};
 
-use crate::Result;
+use crate::{Error, Result};
+
+/// A validated source image, treated as an opaque byte stream for raw copy.
+///
+/// Construct with [`RawImage::open`]; it guarantees the file exists, is
+/// readable, and has a non-zero size.
+#[derive(Debug, Clone)]
+pub struct RawImage {
+    path: PathBuf,
+    size_bytes: u64,
+}
+
+impl RawImage {
+    /// Validate and describe an image for raw copy.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidSource`] if the path is not a regular file or is
+    /// empty, or [`Error::Io`] if its metadata cannot be read.
+    pub fn open(path: &Path) -> Result<Self> {
+        let meta = std::fs::metadata(path)?;
+        if !meta.is_file() {
+            return Err(Error::InvalidSource(format!(
+                "{} is not a regular file",
+                path.display()
+            )));
+        }
+        let size_bytes = meta.len();
+        if size_bytes == 0 {
+            return Err(Error::InvalidSource(format!(
+                "{} is empty",
+                path.display()
+            )));
+        }
+        Ok(Self {
+            path: path.to_path_buf(),
+            size_bytes,
+        })
+    }
+
+    /// Path to the image.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Size of the image in bytes.
+    #[must_use]
+    pub fn size_bytes(&self) -> u64 {
+        self.size_bytes
+    }
+
+    /// Open a fresh reader over the image contents.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Io`] if the file cannot be opened.
+    pub fn open_reader(&self) -> Result<File> {
+        Ok(File::open(&self.path)?)
+    }
+}
 
 /// What kind of source image Ferrus is dealing with.
 #[derive(Debug, Clone, PartialEq, Eq)]
