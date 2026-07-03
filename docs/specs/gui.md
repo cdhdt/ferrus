@@ -93,18 +93,33 @@ The GUI fills exactly the struct frozen in Phase 4.x:
 Empty (no devices), loading (enumerating / running), success (dry-run log shown),
 error (enumeration / ISO / dry-run failure, each with a clear message).
 
-## Known gaps (signalled, not faked)
+## Preliminary Windows-media detection (`source::inspect_iso_kind`)
 
-- **Windows-vs-generic ISO detection is not available unprivileged.** The core only
-  classifies media by scanning a **mounted** ISO (root-only, part of the real
-  flow); dry-run does not mount. So in 5a the GUI cannot auto-decide "Windows vs
-  generic". It shows a `MediaKind` (Unknown by default on selection) and the
-  gating rule "hide Windows tweaks when Generic" is implemented and tested, but the
-  **detection that would set Generic/Windows is deferred**. Proposed core follow-up:
-  a non-mounting `source::inspect_iso_kind(path) -> MediaKind` (ISO9660 directory
-  scan reusing the pure `detect_windows_install`). Until then, the authoritative
-  Windows check remains `prepare_windows` at real-write time (returns
-  `NotWindowsMedia`). This is called out rather than approximated in the GUI.
+A **non-authoritative hint** — `source::inspect_iso_kind(path) -> MediaKind
+{ Windows, Generic, Unknown }` — computed **unprivileged and without mounting** at
+ISO-selection time, to drive the tweaks gating.
+
+- **The UDF trap (empirically established).** On a real 25H2 ISO, the ISO9660 layer
+  is a **stub** (root = only `README.TXT`, no Joliet); `bootmgr`, `efi/`, `sources/`
+  and `install.wim` are all **UDF-only**. So a pure-ISO9660 scan — the obvious
+  first approach — would false-negative every real Windows ISO. Detection therefore
+  reads the **UDF** layer (read-only, no mount) via `hadris-udf` (ADR-0006).
+- **Criterion (structure, not `install.wim`).** UDF root contains `bootmgr` +
+  `sources` + `efi` → `Windows`. `install.wim` is deliberately **not** used: it is
+  UDF-only and huge — a *copy* concern (Phase 3b), not a *detection* one. Keying on
+  it would reintroduce the trap.
+- **`Unknown` is honest, not `Generic`.** Any read failure (not UDF, not an image,
+  I/O error) → `Unknown`. We never claim `Generic` for something we could not read.
+- **Hint vs authority.** `inspect_iso_kind` is only a UI hint. The judge is
+  `detect_windows_install` on the **mounted** ISO at write time. They can diverge on
+  an edge case (structure markers present but no `install.wim`) — acceptable: the
+  write arbitrates with `NotWindowsMedia`. The spec does **not** claim they always
+  agree.
+- **GUI gating.** `Windows` → show tweaks. `Generic` → hide. **`Unknown` →
+  permissive: show the tweaks** (do not deny a feature because we could not read the
+  image; the write arbitrates) with a discreet "media type undetermined" note. The
+  detection runs as an async iced `Task`, so ISO selection never blocks the UI; a
+  stale result for a since-replaced image is ignored (path-matched).
 
 ## Rendering backend (known issue + workaround)
 

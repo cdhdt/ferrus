@@ -10,6 +10,19 @@ unit tests only.
 
 ## [Unreleased]
 
+### Added
+
+- **Preliminary Windows-media detection** (`source::inspect_iso_kind`, wired into
+  the GUI). At ISO selection the GUI now guesses Windows vs generic media
+  **unprivileged and without mounting**, to gate the Windows tweaks. Established
+  empirically that modern Windows ISOs keep their tree in **UDF** (the ISO9660
+  layer is a stub), so a pure-ISO9660 scan would miss them; detection reads the UDF
+  root via `hadris-udf` (MIT; ADR-0006) and keys on structure markers
+  (`bootmgr` + `sources` + `efi`), never on `install.wim`. It is a **hint** —
+  `detect_windows_install` on the mounted ISO stays authoritative at write time.
+  `Unknown` (unreadable) is permissive (tweaks shown, write arbitrates). No
+  `unsafe`; read-only.
+
 ### Changed
 
 - **GUI rendering robustness (Phase 5a.1).** Pin both iced renderers explicitly
