@@ -76,6 +76,6 @@ before then; `ferrus-gui` stays a minimal window shell until Phase 5.
 - iced's command/subscription model means the burn worker runs off the UI thread
   and reports progress over a channel/subscription. This aligns with the
   `progress::ProgressSink` design in `ferrus-core`.
-- The current Phase 0 shell uses `eframe` only as a throwaway placeholder; it is
-  replaced by iced when Phase 5 begins. The dependency is not switched now
-  (no GUI work before Phase 5).
+- The Phase 0 shell used `eframe` only as a throwaway placeholder. **Phase 5a
+  executed the switch to iced** (0.14) as decided here; the eframe dependency is
+  gone. Reconfirmed at the start of Phase 5: iced stands.
