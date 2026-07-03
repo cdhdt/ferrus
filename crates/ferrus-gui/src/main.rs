@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use ferrus_core::device::{Device, SafeTarget, format_size, list_writable_candidates};
 use ferrus_core::partition::prepare_windows;
 use ferrus_core::progress::{ProgressSink, Stage};
-use ferrus_core::source::RawImage;
+use ferrus_core::source::{MediaKind, RawImage, inspect_iso_kind};
 use ferrus_core::windows::{LocalAccountSpec, RegionSpec, WindowsTweaks};
 
 use iced::widget::{button, checkbox, column, container, row, scrollable, space, text, text_input};
@@ -81,21 +81,6 @@ struct IsoInfo {
     size: u64,
 }
 
-/// What kind of install media the ISO is.
-///
-/// In 5a this stays `Unknown` on selection: reliable Windows-vs-generic detection
-/// needs a mount (privileged), which the dry-run does not do — see SPEC-0007. The
-/// *gating* (hide Windows tweaks when `Generic`) is implemented and tested; the
-/// detection that would set it is a deferred core follow-up.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum MediaKind {
-    #[default]
-    Unknown,
-    #[allow(dead_code)] // set by the deferred detector (SPEC-0007); used by gating
-    Windows,
-    Generic,
-}
-
 /// The whole UI state.
 #[derive(Debug, Default)]
 struct Ferrus {
@@ -132,6 +117,7 @@ enum Message {
     PickIso,
     IsoChosen(Option<PathBuf>),
     IsoValidated(Result<IsoInfo, String>),
+    MediaDetected(PathBuf, MediaKind),
     ToggleBypass(bool),
     ToggleAccount(bool),
     AccountName(String),
@@ -197,18 +183,30 @@ impl Ferrus {
                 self.iso_error = None;
                 Task::perform(validate_iso(path), Message::IsoValidated)
             }
-            Message::IsoValidated(result) => {
-                match result {
-                    Ok(info) => {
-                        self.iso = Some(info);
-                        // Detection is deferred (SPEC-0007): we do not claim a kind.
-                        self.media = MediaKind::Unknown;
-                        self.iso_error = None;
-                    }
-                    Err(e) => {
-                        self.iso = None;
-                        self.iso_error = Some(e);
-                    }
+            Message::IsoValidated(Ok(info)) => {
+                let path = info.path.clone();
+                self.iso = Some(info);
+                self.media = MediaKind::Unknown; // until the async hint returns
+                self.iso_error = None;
+                // Preliminary, unprivileged, no-mount Windows-vs-generic hint.
+                Task::perform(
+                    async move {
+                        let kind = inspect_iso_kind(&path);
+                        (path, kind)
+                    },
+                    |(path, kind)| Message::MediaDetected(path, kind),
+                )
+            }
+            Message::IsoValidated(Err(e)) => {
+                self.iso = None;
+                self.iso_error = Some(e);
+                Task::none()
+            }
+            Message::MediaDetected(path, kind) => {
+                // Apply only if it still matches the current ISO (guards a race
+                // where the user picked another image meanwhile).
+                if self.iso.as_ref().is_some_and(|i| i.path == path) {
+                    self.media = kind;
                 }
                 Task::none()
             }
@@ -390,16 +388,29 @@ impl Ferrus {
         let mut col = column![
             text("3 · Windows install tweaks").size(20),
             text("Applied only to Windows install media, via autounattend.xml.").size(13),
-            checkbox(self.bypass_hardware)
-                .label(
-                    "Bypass Windows 11 hardware checks (TPM / Secure Boot / RAM / storage / CPU)"
-                )
-                .on_toggle(Message::ToggleBypass),
-            checkbox(self.account_enabled)
-                .label("Create a local account (no Microsoft account)")
-                .on_toggle(Message::ToggleAccount),
         ]
         .spacing(10);
+
+        if self.media == MediaKind::Unknown {
+            col = col.push(
+                text("• Media type undetermined — tweaks shown anyway; verified at write time.")
+                    .size(12),
+            );
+        }
+
+        col = col
+            .push(
+                checkbox(self.bypass_hardware)
+                    .label(
+                        "Bypass Windows 11 hardware checks (TPM / Secure Boot / RAM / storage / CPU)",
+                    )
+                    .on_toggle(Message::ToggleBypass),
+            )
+            .push(
+                checkbox(self.account_enabled)
+                    .label("Create a local account (no Microsoft account)")
+                    .on_toggle(Message::ToggleAccount),
+            );
 
         if self.account_enabled {
             col = col.push(

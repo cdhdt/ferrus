@@ -153,6 +153,27 @@ fn no_iso_hides_tweaks() {
     assert!(!s.show_tweaks());
 }
 
+#[test]
+fn media_detection_applies_to_current_iso() {
+    let mut s = ready(); // iso = /images/win.iso, media Unknown
+    let _ = s.update(Message::MediaDetected(
+        "/images/win.iso".into(),
+        MediaKind::Windows,
+    ));
+    assert_eq!(s.media, MediaKind::Windows);
+}
+
+#[test]
+fn stale_media_detection_is_ignored() {
+    let mut s = ready();
+    // A result for a different (already replaced) image must not apply.
+    let _ = s.update(Message::MediaDetected(
+        "/other.iso".into(),
+        MediaKind::Generic,
+    ));
+    assert_eq!(s.media, MediaKind::Unknown, "stale detection ignored");
+}
+
 // --- update transitions ---------------------------------------------------
 
 #[test]
