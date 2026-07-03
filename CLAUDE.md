@@ -166,10 +166,16 @@ Proof level is called out per phase: **[real]** = exercised on real hardware;
   local account), `docs/specs/unattend.md` (SPEC-0006). — **[real]**: generator
   unit-tested; validated on a real Windows 11 25H2 install — no TPM wall, local
   account created without a Microsoft account.
+- **Phase 4.x** (done): additional tweaks — minimize telemetry, disable
+  automatic BitLocker, optional regional preset (SPEC-0006). — **[real]**:
+  validated on a real Windows 11 25H2 install in a TPM 2.0 + Secure Boot VM
+  (no auto-BitLocker despite the TPM, silent OOBE with `fr-FR`, booted under
+  Secure Boot via the signed UEFI:NTFS loader). Telemetry is minimized to the
+  edition floor (Required on Home/Pro), not fully off — by design.
 - **Phase 5**: GUI (iced — ADR-0001).
 - **Phase 6**: Windows port.
 - **Phase 7**: macOS port.
 
 Not yet done / known gaps: no GUI; Linux-only; UEFI/GPT only (no legacy BIOS);
-telemetry/BitLocker/regional tweaks not implemented (phase 4.x);
-`cargo clippy`/`cargo fmt` not yet run project-wide (tracked separately).
+per-user (HKCU) privacy toggles deferred (TODO phase4.x+1);
+`cargo clippy`/`cargo fmt` now enforced in CI (GitHub Actions).

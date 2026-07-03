@@ -243,8 +243,11 @@ Honors dry-run (generates nothing on disk; may report the plan).
   and inking/typing are deferred, not shipped as ineffective reg-adds.
 - **BitLocker timing.** `PreventDeviceEncryption` must be in **specialize**
   (before OOBE auto-encryption on 24H2+), not oobeSystem.
-- **Phase 4.x levers are `[unit]` only** — generated and unit-tested, but **not
-  yet confirmed on a real install** (unlike the Phase 4 levers). Mark as such.
+- **Phase 4.x levers — validated on a real 25H2 install** (TPM 2.0 + Secure Boot
+  VM): auto-BitLocker prevented despite the TPM being present, silent OOBE with
+  the `fr-FR` preset, and boot under Secure Boot via the signed UEFI:NTFS loader.
+  Telemetry: OOBE privacy screens pre-answered; the *level* remains the edition
+  floor (Required on Home/Pro), as documented — confirm in Settings if it matters.
 
 ## Out of scope
 

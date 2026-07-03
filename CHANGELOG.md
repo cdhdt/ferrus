@@ -13,8 +13,14 @@ unit tests only.
 ### Added
 
 - **Phase 4.x — additional Windows tweaks** (extends the `autounattend.xml`
-  generator; SPEC-0006). All **[unit]** — generated and unit-tested, not yet
-  confirmed on a real install:
+  generator; SPEC-0006). Unit-tested, and **validated on a real Windows 11 25H2
+  install** in a TPM 2.0 + Secure Boot VM: with the TPM present, automatic
+  BitLocker device encryption did **not** occur (`disable_auto_bitlocker`
+  **[real]**); the OOBE was silent — no language/keyboard prompt
+  (`region=fr-FR` **[real]**); and the stick booted **under Secure Boot** via the
+  signed UEFI:NTFS loader (bonus **[real]**). Telemetry: the OOBE privacy screens
+  were pre-answered **[real]**; the effective diagnostic level is the edition
+  floor (Required on Home/Pro — **[unit]/by-design**, not "off"):
   - `minimize_telemetry`: reduce Windows diagnostic data to the edition minimum
     (`AllowTelemetry=0`; floors to Required/Basic on Home/Pro — **not** fully off
     — Security/Off only on Enterprise/Education/Server) plus disable advertising
