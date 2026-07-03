@@ -55,7 +55,9 @@ pub enum FsKind {
 }
 
 /// External tools the Windows-prepare path needs, checked before any write.
-const REQUIRED_TOOLS: [&str; 4] = ["sfdisk", "mkfs.ntfs", "mkfs.vfat", "partprobe"];
+// P2 is not formatted (the UEFI:NTFS image carries its own FAT — SPEC-0005), so
+// mkfs.vfat is no longer required.
+const REQUIRED_TOOLS: [&str; 3] = ["sfdisk", "mkfs.ntfs", "partprobe"];
 
 /// Partition and format `target` as the skeleton of a Windows install stick,
 /// and — when `image` is given — copy the Windows ISO contents onto it (3b).
@@ -81,19 +83,27 @@ pub fn prepare_windows(
     let nodes = prepare_windows_with(target, progress, backend.as_ref())?;
 
     if let Some(image) = image {
-        // P1 is the NTFS partition; in dry-run there are no real nodes, so fall
-        // back to its intended path.
-        let p1 = nodes
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| partition_path(&target.device().path, 1));
         let layout = compute_windows_layout(target.device().size_bytes)?;
+        let dev = &target.device().path;
+        // In dry-run there are no real nodes; fall back to the intended paths.
+        let p1 = nodes.first().cloned().unwrap_or_else(|| partition_path(dev, 1));
+        let p2 = nodes.get(1).cloned().unwrap_or_else(|| partition_path(dev, 2));
+
+        // 3b: copy the Windows files onto P1 (NTFS).
         crate::copy::copy_windows(
             image,
             &p1,
             layout.windows.size_bytes,
             target.is_dry_run(),
             verify,
+            progress,
+        )?;
+
+        // 3c: write the UEFI:NTFS bootloader onto P2 — makes the stick bootable.
+        crate::boot::install_uefi_ntfs(
+            &p2,
+            layout.helper.size_bytes,
+            target.is_dry_run(),
             progress,
         )?;
     }
@@ -155,19 +165,19 @@ fn prepare_windows_with(
     progress.message("re-reading partition table");
     backend.reread_partition_table(&device.path)?;
     let nodes = backend.wait_for_partitions(&device.path, 2)?;
-    let (Some(p1), Some(p2)) = (nodes.first(), nodes.get(1)) else {
+    let Some(p1) = nodes.first() else {
         return Err(Error::PartitionNodesMissing {
             device: device.path.clone(),
             expected: 2,
         });
     };
 
+    // Only P1 is formatted here. P2 is left raw: the UEFI:NTFS image written in
+    // 3c carries its own FAT filesystem (SPEC-0005), so an mkfs.vfat is redundant.
     progress.message(&format!("formatting {} as NTFS", p1.display()));
     backend.make_filesystem(p1, layout.windows.fs, layout.windows.name)?;
-    progress.message(&format!("formatting {} as FAT", p2.display()));
-    backend.make_filesystem(p2, layout.helper.fs, layout.helper.name)?;
 
-    progress.message("partitioned and formatted");
+    progress.message("partitioned; P1 formatted NTFS (P2 left raw for the bootloader)");
     Ok(nodes)
 }
 

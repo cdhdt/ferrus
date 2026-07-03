@@ -165,6 +165,7 @@ fn happy_path_runs_operations_in_order() {
 
     prepare_windows_with(&target(false), &mut progress, &backend).unwrap();
 
+    // P2 is left raw (SPEC-0005), so only P1 is formatted.
     assert_eq!(
         *backend.log.borrow(),
         vec![
@@ -176,7 +177,6 @@ fn happy_path_runs_operations_in_order() {
             "reread",
             "wait",
             "mkfs:Ntfs:/dev/sda1",
-            "mkfs:Fat:/dev/sda2",
         ]
     );
 }

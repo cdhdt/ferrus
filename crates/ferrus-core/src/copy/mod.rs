@@ -18,6 +18,9 @@ mod windows;
 
 pub use windows::copy_windows;
 
+/// The Phase 2 block-copy loop, reused by the bootloader writer (Phase 3c).
+pub(crate) use stream::copy_stream;
+
 use std::io::Read;
 use std::path::Path;
 
@@ -27,7 +30,7 @@ use crate::progress::{ProgressSink, Stage};
 use crate::source::RawImage;
 use crate::{Error, Result};
 
-use stream::{BLOCK_SIZE, copy_stream};
+use stream::BLOCK_SIZE;
 
 /// Byte-for-byte copy of `image` onto the target device behind `target`.
 ///

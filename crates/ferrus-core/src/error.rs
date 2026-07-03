@@ -126,6 +126,24 @@ pub enum Error {
     #[error("verification failed: {0}")]
     VerificationFailed(String),
 
+    /// The vendored bootloader image failed its SHA-256 integrity check.
+    #[error("bootloader integrity check failed (expected {expected}, got {actual})")]
+    BootloaderIntegrity {
+        /// Pinned expected SHA-256 (hex).
+        expected: String,
+        /// Actual SHA-256 of the embedded image (hex).
+        actual: String,
+    },
+
+    /// The bootloader image does not fit the helper partition.
+    #[error("bootloader image ({image_bytes} B) exceeds the helper partition ({partition_bytes} B)")]
+    ImageExceedsPartition {
+        /// Size of the bootloader image in bytes.
+        image_bytes: u64,
+        /// Size of the helper partition in bytes.
+        partition_bytes: u64,
+    },
+
     /// The operation, or the current platform target, is not implemented yet.
     #[error("not implemented: {0}")]
     Unsupported(String),

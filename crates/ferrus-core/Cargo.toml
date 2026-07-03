@@ -9,6 +9,7 @@ rust-version.workspace = true
 description = "Core engine for Ferrus: platform-abstracted bootable USB creation."
 
 [dependencies]
+sha2 = "0.11.0"
 thiserror.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
