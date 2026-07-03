@@ -106,6 +106,30 @@ error (enumeration / ISO / dry-run failure, each with a clear message).
   Windows check remains `prepare_windows` at real-write time (returns
   `NotWindowsMedia`). This is called out rather than approximated in the GUI.
 
+## Rendering backend (known issue + workaround)
+
+iced renders on the GPU via **wgpu** by default. On some GPUs/drivers wgpu
+**initializes successfully but renders corrupted text** — iced's automatic
+fallback only triggers when wgpu fails to *initialize*, not when it renders
+badly, so it does not help here. There is **no reliable way to auto-detect
+bad rendering**; Ferrus does not attempt a heuristic (that would be unreliable
+guesswork).
+
+Mitigation: the CPU renderer **tiny-skia** is pinned as a compiled-in feature
+(`iced = { features = ["wgpu", "tiny-skia"] }`) and renders correctly. It is
+selected with `ICED_BACKEND=tiny-skia`.
+
+**Why a manual environment variable and not a flag/API:** verified against the
+iced 0.14 source — the public `application()` builder and `Settings` expose **no
+programmatic backend selection**; the internal `iced_renderer` `backend` slot is
+fed only by the `ICED_BACKEND` env var. Setting an env var from code needs
+`std::env::set_var`, which is `unsafe` under edition 2024 and therefore barred by
+`#![forbid(unsafe_code)]`. Ferrus does not weaken that invariant. Discoverability
+is provided instead: `ferrus-gui` prints the active backend + the workaround at
+startup, and the README documents it. A clean `--software-render` flag (via a
+safe self-re-exec that sets the child's environment, or an external launcher)
+remains an option, pending a decision — it is **not** yet implemented.
+
 ## Testability
 
 Rendering is not unit-tested (iced views cannot be asserted reliably); this is

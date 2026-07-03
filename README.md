@@ -75,6 +75,24 @@ Ferrus erases block devices. It refuses to touch non-removable devices or the
 system disk, requires explicit target confirmation, and supports `--dry-run`.
 See the safety rules in [`CLAUDE.md`](CLAUDE.md).
 
+## Troubleshooting — display / text artifacts
+
+The GUI (`ferrus-gui`) renders on the GPU via iced's `wgpu` backend by default.
+On some GPUs/drivers, wgpu **initializes successfully but renders corrupted text**
+(garbled glyphs, e.g. on hover) — this is a driver/GPU issue, not a Ferrus bug,
+and Ferrus cannot reliably auto-detect it.
+
+The fix is to switch to the **CPU (software) renderer**, `tiny-skia`, which is
+always compiled in. Run:
+
+```sh
+ICED_BACKEND=tiny-skia ferrus-gui
+```
+
+Rendering will be slower but pixel-correct. On startup `ferrus-gui` prints one
+line noting the active backend and this workaround. (iced 0.14 offers no
+programmatic backend switch, so this is set via the environment variable.)
+
 ## License
 
 [GPL-3.0-or-later](LICENSE). Ferrus embeds [UEFI:NTFS](https://github.com/pbatard/uefi-ntfs)

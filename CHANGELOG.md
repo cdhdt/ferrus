@@ -10,6 +10,18 @@ unit tests only.
 
 ## [Unreleased]
 
+### Changed
+
+- **GUI rendering robustness (Phase 5a.1).** Pin both iced renderers explicitly
+  (`wgpu` + `tiny-skia`) so the CPU/software fallback is always compiled. On GPUs
+  where wgpu renders corrupted text, run `ICED_BACKEND=tiny-skia ferrus-gui` for
+  pixel-correct CPU rendering. `ferrus-gui` now prints the active backend and this
+  workaround at startup; the README has a Troubleshooting section. No automatic
+  detection (bad rendering can't be reliably detected) and no `unsafe` introduced
+  — iced 0.14 has no programmatic backend switch, so the lever stays the
+  `ICED_BACKEND` env var. A `--software-render` flag is deferred pending a design
+  decision.
+
 ### Added
 
 - **Phase 4.x — additional Windows tweaks** (extends the `autounattend.xml`
