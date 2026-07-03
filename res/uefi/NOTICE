@@ -1,35 +1,48 @@
 UEFI:NTFS — vendored bootloader
 ================================
 
-This directory is the intended home of the UEFI:NTFS bootloader image that
-Ferrus writes to a small FAT helper partition so that UEFI firmware can boot an
-NTFS main partition (the strategy Ferrus uses for Windows install media).
+`uefi-ntfs.img` in this directory is the UEFI:NTFS bootloader image that Ferrus
+writes (raw, `dd`-style) onto the small FAT helper partition (P2) of a Windows
+install stick, so that UEFI firmware can boot the NTFS main partition (P1). See
+docs/adr/0002-uefi-ntfs-vendoring.md and docs/specs/bootloader.md (SPEC-0005).
 
-Status
-------
-NOT YET VENDORED. Phase 0 ships this NOTICE only; the actual binary asset is
-added in Phase 3, together with a checked-in hash and the details below filled
-in. See docs/adr/0002-uefi-ntfs-vendoring.md.
+How it works
+------------
+The image is itself a small FAT12 filesystem containing:
+  - /EFI/Boot/bootx64.efi   — the UEFI:NTFS loader (and ia32/aa64/arm/riscv64)
+  - /EFI/Rufus/ntfs_*.efi    — the NTFS read filesystem driver (+ exFAT drivers)
+UEFI firmware runs /EFI/Boot/bootx64.efi from this FAT partition; it loads the
+NTFS driver, mounts P1, and chain-loads P1's /efi/boot/bootx64.efi (the Windows
+boot manager that Ferrus copies to P1 in Phase 3b).
 
-Provenance (to be completed when the asset is added)
-----------------------------------------------------
+Provenance (pinned)
+-------------------
 - Upstream project : UEFI:NTFS by Pete Batard (pbatard)
-- Upstream source  : https://github.com/pbatard/uefi-ntfs
-- Version / commit : <TODO: pin exact release/commit>
-- Asset file       : <TODO: e.g. uefi-ntfs.img>
-- SHA-256          : <TODO: hash of the vendored asset>
+- Bootloader source: https://github.com/pbatard/uefi-ntfs  (release v2.8)
+- Vendored image   : Rufus repository, tag v4.15, path res/uefi/uefi-ntfs.img
+- Exact URL        : https://raw.githubusercontent.com/pbatard/rufus/v4.15/res/uefi/uefi-ntfs.img
+- Asset file       : uefi-ntfs.img
+- Size             : 1048576 bytes (exactly 1 MiB)
+- SHA-256          : 72683fa1250eeea772d3399277b434d4e55ba8dd0dc926e52d817e701fc2eb9e
+
+Secure Boot (verified, not assumed)
+-----------------------------------
+The /EFI/Boot/bootx64.efi inside this image is the **Secure Boot-signed** loader.
+Verified by byte-for-byte comparison: the bootx64.efi extracted from this image
+is identical to the official signed release asset
+`bootx64_signed.efi` of pbatard/uefi-ntfs v2.8
+(SHA-256 5e22e6209ea557fce49cdbab7d06be4fc99e65d45c4fba01da928e763776bb94),
+and differs from the unsigned `bootx64.efi` (SHA-256 f04f3383...). A signed loader
+lets the stick boot with Secure Boot enabled.
 
 License and GPL compliance
 --------------------------
 UEFI:NTFS is licensed under the GNU General Public License v3.0. Ferrus is
-GPL-3.0-or-later, so redistribution is compatible. To satisfy the GPL when we
-ship the binary, this directory MUST also carry:
+GPL-3.0-or-later, so redistributing this binary — including embedding it in the
+Ferrus binary via `include_bytes!` — is compatible. The corresponding source is
+the upstream repositories pinned above (pbatard/uefi-ntfs; the image is built and
+vendored by pbatard/rufus). The repo-root LICENSE carries the full GPLv3 text.
 
-  1. A verbatim copy of the UEFI:NTFS license (the repo-root LICENSE is GPLv3
-     and covers it, but keep the upstream copyright notice here too).
-  2. A reference to the corresponding source (the upstream URL and pinned
-     commit above), i.e. a clear written offer / pointer to the exact source
-     the binary was built from.
-
-Do not add the binary without completing the provenance block and the license
-copy in the same commit.
+Updating this asset is an explicit, reviewed commit that changes the binary, the
+SHA-256 above, and the `UEFI_NTFS_IMG_SHA256` constant in
+crates/ferrus-core/src/boot/ together.

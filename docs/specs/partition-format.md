@@ -14,12 +14,17 @@ Windows install stick: a GPT with a large NTFS partition and a small FAT helper
 partition at the end. This is destructive (it wipes the existing partition
 table).
 
-In scope (3a): erase the existing table, write the GPT below, format P1 as NTFS
-and P2 as FAT. Nothing else.
+In scope (3a): erase the existing table, write the GPT below, and format P1 as
+NTFS. Nothing else.
+
+> **Amended by SPEC-0005:** P2 is **no longer formatted** by 3a. The UEFI:NTFS
+> image written to P2 in 3c is itself a complete FAT12 filesystem, so an
+> `mkfs.vfat` here would be redundant — 3a leaves P2 raw. (Original text below
+> kept for context but superseded on this point.)
 
 NOT in scope: mounting, copying Windows files (3b), writing the UEFI:NTFS
 bootloader onto P2 (3c), generating `autounattend.xml` (Phase 4). **A stick
-produced by 3a does not boot yet** — P2 is an empty FAT filesystem; the
+produced by 3a does not boot yet** — P2 is a raw, empty partition; the
 bootloader arrives in 3c. Do not imply otherwise.
 
 ## Layout (verified, no invented GUIDs)
@@ -66,13 +71,12 @@ exact size is only known once the asset is vendored (3c, ADR-0002). 3a reserves 
 safe aligned 1 MiB; 3c re-derives/validates against the vendored asset and, if it
 is larger, revisits this size. TODO(phase3c): confirm P2 ≥ vendored payload.
 
-### Deployment style note (for 3c)
+### Deployment style note (finalized in SPEC-0005)
 
-Ferrus formats P2 as an empty FAT filesystem here and will **drop the UEFI:NTFS
-`.efi` files into it** in 3c (file-drop style). The alternative — raw-writing
-`uefi-ntfs.img` (a complete FAT image) onto P2 — would make this mkfs redundant.
-The choice is finalized in 3c; formatting an empty valid FAT now keeps the
-file-drop path working out of the box.
+3c writes the vendored `uefi-ntfs.img` **raw** onto P2. That image is a complete
+FAT12 filesystem (containing the UEFI:NTFS loader + NTFS driver), so P2 needs no
+`mkfs.vfat` in 3a — it is left raw and overwritten wholesale in 3c. The image is
+exactly 1 MiB, so P2 stays 1 MiB.
 
 ## Invariants
 
@@ -81,8 +85,9 @@ file-drop path working out of the box.
    the test-only constructor.
 2. **Dry-run touches nothing** — no table write, no mkfs, no unmount. *Tested.*
 3. **Root required** (EUID gate, reused from SPEC-0002). *Tested* (fake euid).
-4. **Tools present or clean failure.** `sfdisk`, `mkfs.ntfs`, `mkfs.vfat`,
-   `partprobe` are checked *before any destructive step*; a missing one yields
+4. **Tools present or clean failure.** `sfdisk`, `mkfs.ntfs`, `partprobe` are
+   checked *before any destructive step* (P2 is not formatted, so `mkfs.vfat` is
+   no longer required); a missing one yields
    `Error::MissingTool { name }` with nothing written. *Tested.*
 5. **Unmount the target's mounted partitions first** (reused from SPEC-0002),
    with the defense-in-depth system/critical re-check that aborts before
@@ -100,7 +105,7 @@ file-drop path working out of the box.
 `SafeTarget` → compute layout (pure; `DeviceTooSmall` if below minimum) → **EUID
 gate** → **ensure tools** → system/critical re-check → **unmount** mounted
 partitions → **write GPT** (sfdisk) → **reread** (partprobe) → **wait for nodes**
-→ **mkfs.ntfs P1** → **mkfs.vfat P2** → done.
+→ **mkfs.ntfs P1** (P2 left raw for 3c) → done.
 
 Dry-run stops after computing the layout and reporting the plan.
 
@@ -122,7 +127,8 @@ with no hardware. Same pattern as SPEC-0002's `WriteBackend`.
   firmwares; everything is 1 MiB-aligned.
 - **Sector size.** Expressing the script in MiB (not raw 512-byte sectors) lets
   sfdisk handle 512 vs 4Kn devices correctly.
-- **P2 size is provisional** until the UEFI:NTFS asset is vendored (3c).
+- **P2 size is confirmed** at 1 MiB: the vendored `uefi-ntfs.img` is exactly
+  1 MiB (SPEC-0005), so it fits P2 precisely.
 - **mkfs.ntfs is slow** unless quick-formatted (`--quick`); we quick-format.
 
 ## Out of scope
