@@ -61,15 +61,12 @@ converts MiB using the device's real logical sector size):
 So for a device of `D` MiB: `P1 = [1, D-2) MiB`, `P2 = [D-2, D-1) MiB`. Refuse
 devices below a small minimum (**64 MiB**) so P1 is a sane, formattable size.
 
-### P2 size — why 1 MiB, and what is deferred
+### P2 size — 1 MiB (confirmed)
 
-The real UEFI:NTFS payload (an NTFS UEFI driver ~130 KiB + the UEFI:NTFS loader
-~40 KiB) is well under 1 MiB, so a 1 MiB FAT partition holds it comfortably with
-FAT overhead, and 1 MiB is the alignment granule (no extra waste). This is **not
-hardcoded from memory**: Rufus sizes P2 from the actual `uefi-ntfs.img`, whose
-exact size is only known once the asset is vendored (3c, ADR-0002). 3a reserves a
-safe aligned 1 MiB; 3c re-derives/validates against the vendored asset and, if it
-is larger, revisits this size. TODO(phase3c): confirm P2 ≥ vendored payload.
+1 MiB is the alignment granule, and the vendored `uefi-ntfs.img` is **exactly
+1 MiB** (SPEC-0005), so it fits P2 precisely — no resize needed. This size was
+**not hardcoded from memory**: it was confirmed against the real asset when it
+was vendored in 3c (ADR-0002).
 
 ### Deployment style note (finalized in SPEC-0005)
 

@@ -17,7 +17,7 @@
 //!
 //! - [`error`]     — error types.
 //! - [`device`]    — device enumeration and safe target selection.
-//! - [`source`]    — ISO inspection (Windows vs generic, `install.wim`).
+//! - [`source`]    — source image (`RawImage`) + Windows-media detection.
 //! - [`partition`] — partition scheme (GPT/MBR, UEFI/Legacy).
 //! - [`format`]    — filesystem creation wrappers.
 //! - [`copy`]      — ISO content extraction/copy.
