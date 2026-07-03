@@ -9,6 +9,7 @@
 //! [`sysfs`] (pure) and [`mounts`] (resolution behind a testable trait).
 
 mod mounts;
+mod partition;
 mod sysfs;
 mod write;
 

@@ -77,6 +77,32 @@ pub enum Error {
         offset: u64,
     },
 
+    /// A required external tool (e.g. `sfdisk`, `mkfs.ntfs`) is not installed.
+    #[error("required tool not found: {name}")]
+    MissingTool {
+        /// Name of the missing executable.
+        name: String,
+    },
+
+    /// The target device is too small for the requested layout.
+    #[error("device is too small ({device_bytes} B < {minimum_bytes} B minimum)")]
+    DeviceTooSmall {
+        /// Capacity of the target device in bytes.
+        device_bytes: u64,
+        /// Minimum capacity required, in bytes.
+        minimum_bytes: u64,
+    },
+
+    /// After writing the partition table, the expected partition device nodes
+    /// did not appear in time.
+    #[error("partition nodes for {device} did not appear (expected {expected})")]
+    PartitionNodesMissing {
+        /// The whole-device path whose partitions were awaited.
+        device: PathBuf,
+        /// Number of partition nodes expected.
+        expected: usize,
+    },
+
     /// The operation, or the current platform target, is not implemented yet.
     #[error("not implemented: {0}")]
     Unsupported(String),

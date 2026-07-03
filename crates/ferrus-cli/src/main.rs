@@ -15,6 +15,7 @@ use ferrus_core::device::{
     LARGE_TARGET_THRESHOLD_BYTES, SafeTarget, format_size, list_all_devices,
     list_writable_candidates,
 };
+use ferrus_core::partition::prepare_windows;
 use ferrus_core::progress::{ProgressSink, Stage};
 use ferrus_core::source::RawImage;
 use ferrus_core::windows::{TweakOptions, labconfig_keys};
@@ -33,6 +34,20 @@ enum Command {
     List(ListArgs),
     /// Write an image to a USB device (optionally with Windows tweaks).
     Write(WriteArgs),
+    /// Partition and format a device as a Windows install stick (Phase 3a:
+    /// GPT + NTFS + FAT helper; does not copy files or install a bootloader).
+    PrepareWindows(PrepareArgs),
+}
+
+#[derive(Debug, Args)]
+struct PrepareArgs {
+    /// Target device path (e.g. /dev/sdb). Must be typed exactly.
+    #[arg(long, value_name = "DEV")]
+    target: std::path::PathBuf,
+
+    /// Describe the partition plan without touching any device.
+    #[arg(long)]
+    dry_run: bool,
 }
 
 #[derive(Debug, Args)]
@@ -120,7 +135,38 @@ fn main() -> Result<()> {
     match cli.command {
         Command::List(args) => cmd_list(&args),
         Command::Write(args) => cmd_write(&args),
+        Command::PrepareWindows(args) => cmd_prepare_windows(&args),
     }
+}
+
+fn cmd_prepare_windows(args: &PrepareArgs) -> Result<()> {
+    let device = list_all_devices()
+        .context("failed to enumerate devices")?
+        .into_iter()
+        .find(|dev| dev.path == args.target)
+        .ok_or_else(|| {
+            anyhow!(
+                "{} is not a block device on this host (run `ferrus list`)",
+                args.target.display()
+            )
+        })?;
+    let target = SafeTarget::acquire(device, &args.target, args.dry_run)
+        .context("target rejected by the safety checkpoint")?;
+
+    println!("Ferrus prepare-windows");
+    println!(
+        "  target : {} ({})",
+        target.device().path.display(),
+        format_size(target.device().size_bytes),
+    );
+    println!(
+        "  mode   : {}",
+        if target.is_dry_run() { "dry-run" } else { "REAL (destructive)" },
+    );
+
+    let mut progress = CliProgress::default();
+    prepare_windows(&target, &mut progress).context("prepare-windows failed")?;
+    Ok(())
 }
 
 fn cmd_list(args: &ListArgs) -> Result<()> {

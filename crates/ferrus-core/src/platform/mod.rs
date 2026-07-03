@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use crate::Result;
 use crate::device::Device;
+use crate::partition::FsKind;
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -148,6 +149,86 @@ pub fn write_backend() -> Result<Box<dyn WriteBackend>> {
     {
         Err(crate::Error::Unsupported(
             "no write backend for this OS yet".to_owned(),
+        ))
+    }
+}
+
+/// Host-specific operations for partitioning and formatting (SPEC-0003), behind
+/// a trait so the orchestration is testable with a fake.
+pub trait PartitionBackend {
+    /// Effective UID of the current process (0 = root).
+    ///
+    /// # Errors
+    /// Returns an error if it cannot be determined.
+    fn effective_uid(&self) -> Result<u32>;
+
+    /// Whether `device_path` currently backs the system or a critical mount.
+    ///
+    /// # Errors
+    /// Returns an error if mount state cannot be read.
+    fn is_system_or_critical(&self, device_path: &Path) -> Result<bool>;
+
+    /// Mountpoints of partitions currently mounted from `device_path`.
+    ///
+    /// # Errors
+    /// Returns an error if mount state cannot be read.
+    fn mounted_partitions(&self, device_path: &Path) -> Result<Vec<PathBuf>>;
+
+    /// Unmount the filesystem at `mountpoint`.
+    ///
+    /// # Errors
+    /// Returns an error if the unmount fails.
+    fn unmount(&self, mountpoint: &Path) -> Result<()>;
+
+    /// Verify every named tool is installed, before any destructive step.
+    ///
+    /// # Errors
+    /// Returns [`Error::MissingTool`](crate::Error::MissingTool) for the first
+    /// absent tool.
+    fn ensure_tools(&self, tools: &[&str]) -> Result<()>;
+
+    /// Write a partition table to `device_path` from an `sfdisk` script.
+    ///
+    /// # Errors
+    /// Returns an error if the table cannot be written.
+    fn write_partition_table(&self, device_path: &Path, script: &str) -> Result<()>;
+
+    /// Ask the kernel to re-read the partition table of `device_path`.
+    ///
+    /// # Errors
+    /// Returns an error if the re-read fails.
+    fn reread_partition_table(&self, device_path: &Path) -> Result<()>;
+
+    /// Wait (bounded) for `count` partition device nodes of `device_path` to
+    /// appear, returning their paths.
+    ///
+    /// # Errors
+    /// Returns [`Error::PartitionNodesMissing`](crate::Error::PartitionNodesMissing)
+    /// if they do not appear in time.
+    fn wait_for_partitions(&self, device_path: &Path, count: usize) -> Result<Vec<PathBuf>>;
+
+    /// Create a filesystem of `fs` on `partition_path` with `label`.
+    ///
+    /// # Errors
+    /// Returns an error if the mkfs tool fails.
+    fn make_filesystem(&self, partition_path: &Path, fs: FsKind, label: &str) -> Result<()>;
+}
+
+/// Returns the [`PartitionBackend`] for the current compilation target.
+///
+/// # Errors
+///
+/// Returns [`Error::Unsupported`](crate::Error::Unsupported) when compiled for
+/// an OS that does not yet have a partition backend.
+pub fn partition_backend() -> Result<Box<dyn PartitionBackend>> {
+    #[cfg(target_os = "linux")]
+    {
+        Ok(Box::new(linux::LinuxBackend::new()))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err(crate::Error::Unsupported(
+            "no partition backend for this OS yet".to_owned(),
         ))
     }
 }

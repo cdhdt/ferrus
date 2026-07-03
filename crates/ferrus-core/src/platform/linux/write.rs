@@ -29,6 +29,43 @@ pub(super) fn parse_effective_uid(status: &str) -> Option<u32> {
     None
 }
 
+/// Read the process's effective UID. Shared by the write and partition backends.
+pub(super) fn read_effective_uid() -> Result<u32> {
+    let status = std::fs::read_to_string("/proc/self/status")?;
+    parse_effective_uid(&status).ok_or_else(|| io::Error::other("could not parse effective uid").into())
+}
+
+/// Mountpoints of partitions currently mounted from `device_path`.
+pub(super) fn list_mounted_partitions(device_path: &Path) -> Result<Vec<PathBuf>> {
+    let Some(disk) = device_path.file_name() else {
+        return Ok(Vec::new());
+    };
+    let disk = disk.to_string_lossy().into_owned();
+    let mounts = std::fs::read_to_string("/proc/mounts")?;
+    Ok(mountpoints_backed_by(&mounts, &disk, &RealBlockFs)
+        .into_iter()
+        .map(PathBuf::from)
+        .collect())
+}
+
+/// Unmount the filesystem at `mountpoint` via `umount(8)`.
+pub(super) fn run_umount(mountpoint: &Path) -> Result<()> {
+    let status = Command::new("umount")
+        .arg(mountpoint)
+        .status()
+        .map_err(|e| Error::Tool {
+            tool: "umount".to_owned(),
+            reason: e.to_string(),
+        })?;
+    if !status.success() {
+        return Err(Error::Tool {
+            tool: "umount".to_owned(),
+            reason: format!("failed to unmount {}: {status}", mountpoint.display()),
+        });
+    }
+    Ok(())
+}
+
 /// A [`WriteSink`] over an exclusively-opened block device.
 struct FileSink {
     file: File,
@@ -49,9 +86,7 @@ impl WriteSink for FileSink {
 
 impl WriteBackend for LinuxBackend {
     fn effective_uid(&self) -> Result<u32> {
-        let status = std::fs::read_to_string("/proc/self/status")?;
-        parse_effective_uid(&status)
-            .ok_or_else(|| io::Error::other("could not parse effective uid").into())
+        read_effective_uid()
     }
 
     fn is_system_or_critical(&self, device_path: &Path) -> Result<bool> {
@@ -59,32 +94,11 @@ impl WriteBackend for LinuxBackend {
     }
 
     fn mounted_partitions(&self, device_path: &Path) -> Result<Vec<PathBuf>> {
-        let Some(disk) = device_path.file_name() else {
-            return Ok(Vec::new());
-        };
-        let disk = disk.to_string_lossy().into_owned();
-        let mounts = std::fs::read_to_string("/proc/mounts")?;
-        Ok(mountpoints_backed_by(&mounts, &disk, &RealBlockFs)
-            .into_iter()
-            .map(PathBuf::from)
-            .collect())
+        list_mounted_partitions(device_path)
     }
 
     fn unmount(&self, mountpoint: &Path) -> Result<()> {
-        let status = Command::new("umount")
-            .arg(mountpoint)
-            .status()
-            .map_err(|e| Error::Tool {
-                tool: "umount".to_owned(),
-                reason: e.to_string(),
-            })?;
-        if !status.success() {
-            return Err(Error::Tool {
-                tool: "umount".to_owned(),
-                reason: format!("failed to unmount {}: {status}", mountpoint.display()),
-            });
-        }
-        Ok(())
+        run_umount(mountpoint)
     }
 
     fn open_exclusive_writer(&self, device_path: &Path) -> Result<Box<dyn WriteSink>> {
