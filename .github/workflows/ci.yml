@@ -20,6 +20,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # System libraries iced needs to build on Linux — the exact list from
+      # iced's own CI (not guessed). rfd uses its default xdg-portal backend, so
+      # no GTK is strictly required to build, but libgtk-3-dev matches upstream
+      # and is harmless. This is what lets the whole workspace (ferrus-gui
+      # included) build/lint/test on the runner.
+      - name: Install GUI system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libgtk-3-dev
+
       # rust-toolchain.toml pins Rust 1.94.1 with the clippy and rustfmt
       # components; rustup on the runner honors it (installs on first use).
       - name: Show toolchain
@@ -30,13 +38,8 @@ jobs:
       - name: Format (all crates)
         run: cargo fmt --all --check
 
-      # ferrus-gui is a Phase 0 placeholder whose only real dependency (eframe)
-      # pulls native GUI system libraries. To keep CI hermetic and green without
-      # guessing an apt package list, lint and test the engine + CLI — where all
-      # the logic and the 65 tests live. Add a GUI job (with its system deps)
-      # when Phase 5 begins.
-      - name: Clippy (deny warnings)
-        run: cargo clippy -p ferrus-core -p ferrus-cli --all-targets --all-features -- -D warnings
+      - name: Clippy (deny warnings, whole workspace)
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-      - name: Test
-        run: cargo test -p ferrus-core -p ferrus-cli
+      - name: Test (whole workspace)
+        run: cargo test --workspace

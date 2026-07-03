@@ -6,15 +6,18 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "Graphical front-end for Ferrus (egui/eframe — see ADR-0001)."
+description = "Graphical front-end for Ferrus (iced — see ADR-0001)."
 
 [[bin]]
 name = "ferrus-gui"
 path = "src/main.rs"
 
 [dependencies]
-# GUI framework: egui via eframe (ADR-0001). Version resolved against the
-# pinned 1.94.1 toolchain, not hardcoded from memory.
-eframe = "0.32.3"
-# NOTE: ferrus-core is intentionally NOT a dependency yet — this crate is a
-# window shell only (no flow logic, no engine calls) until Phase 5.
+# The engine. The GUI consumes it and adds no business logic of its own.
+ferrus-core = { path = "../ferrus-core" }
+# GUI framework: iced (ADR-0001). Versions verified against crates.io, not from
+# memory: iced 0.14 is the latest stable (functional application API).
+iced = "0.14"
+# Native file picker. rfd 0.17's default Linux backend is xdg-portal (pure Rust,
+# no GTK build dependency); the desktop portal provides the dialog at runtime.
+rfd = "0.17"
