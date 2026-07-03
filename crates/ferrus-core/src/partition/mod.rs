@@ -25,6 +25,7 @@ use crate::device::{SafeTarget, format_size};
 use crate::platform::PartitionBackend;
 use crate::progress::{ProgressSink, Stage};
 use crate::source::RawImage;
+use crate::windows::WindowsTweaks;
 use crate::{Error, Result};
 
 /// Partition-table style.
@@ -76,6 +77,7 @@ const REQUIRED_TOOLS: [&str; 3] = ["sfdisk", "mkfs.ntfs", "partprobe"];
 pub fn prepare_windows(
     target: &SafeTarget,
     image: Option<&RawImage>,
+    tweaks: Option<&WindowsTweaks>,
     verify: bool,
     progress: &mut dyn ProgressSink,
 ) -> Result<()> {
@@ -89,11 +91,12 @@ pub fn prepare_windows(
         let p1 = nodes.first().cloned().unwrap_or_else(|| partition_path(dev, 1));
         let p2 = nodes.get(1).cloned().unwrap_or_else(|| partition_path(dev, 2));
 
-        // 3b: copy the Windows files onto P1 (NTFS).
+        // 3b: copy the Windows files onto P1 (NTFS), plus autounattend.xml (Ph.4).
         crate::copy::copy_windows(
             image,
             &p1,
             layout.windows.size_bytes,
+            tweaks,
             target.is_dry_run(),
             verify,
             progress,

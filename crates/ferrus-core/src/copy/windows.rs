@@ -5,6 +5,7 @@
 //! partition read-write, streams the whole tree across, syncs, and (via RAII
 //! guards) unmounts — even on a mid-copy failure.
 
+use std::io::Write;
 use std::path::Path;
 
 use super::tree::{self, RealTreeIo, TreeIo};
@@ -12,6 +13,7 @@ use crate::device::format_size;
 use crate::platform::{MountBackend, mount_backend};
 use crate::progress::{ProgressSink, Stage};
 use crate::source::{RawImage, detect_windows_install};
+use crate::windows::WindowsTweaks;
 use crate::{Error, Result};
 
 /// Copy the contents of the Windows ISO `image` onto the NTFS `partition`.
@@ -29,6 +31,7 @@ pub fn copy_windows(
     image: &RawImage,
     partition: &Path,
     capacity: u64,
+    tweaks: Option<&WindowsTweaks>,
     dry_run: bool,
     verify: bool,
     progress: &mut dyn ProgressSink,
@@ -39,6 +42,7 @@ pub fn copy_windows(
         image,
         partition,
         capacity,
+        tweaks,
         dry_run,
         verify,
         progress,
@@ -61,6 +65,7 @@ pub(super) fn copy_windows_with(
     image: &RawImage,
     partition: &Path,
     capacity: u64,
+    tweaks: Option<&WindowsTweaks>,
     dry_run: bool,
     verify: bool,
     progress: &mut dyn ProgressSink,
@@ -69,13 +74,20 @@ pub(super) fn copy_windows_with(
 ) -> Result<()> {
     progress.stage(Stage::Copying);
 
+    let apply_tweaks = tweaks.is_some_and(WindowsTweaks::any);
+
     if dry_run {
         progress.message(&format!(
-            "dry-run: would validate {} and copy its contents (image is {}) to {} \
+            "dry-run: would validate {} and copy its contents (image is {}) to {}{} \
              — nothing mounted",
             image.path().display(),
             format_size(image.size_bytes()),
             partition.display(),
+            if apply_tweaks {
+                ", then drop autounattend.xml (Windows tweaks)"
+            } else {
+                ""
+            },
         ));
         return Ok(());
     }
@@ -101,6 +113,19 @@ pub(super) fn copy_windows_with(
         format_size(scan.total_bytes)
     ));
     let copied = tree::copy_tree(io, iso.path(), ntfs.path(), scan.total_bytes, progress)?;
+
+    // Phase 4: drop autounattend.xml at the P1 root while it is still mounted,
+    // before the sync. Never log the file content / password.
+    if let Some(tweaks) = tweaks
+        && tweaks.any()
+    {
+        progress.message("writing autounattend.xml (Windows tweaks)");
+        let xml =
+            crate::windows::generate_autounattend(tweaks, crate::windows::default_profile())?;
+        let dest = ntfs.path().join(crate::windows::AUTOUNATTEND_FILENAME);
+        let mut writer = io.open_write(&dest)?;
+        writer.write_all(xml.as_bytes())?;
+    }
 
     progress.stage(Stage::Finalizing);
     progress.message("flushing NTFS (sync)");

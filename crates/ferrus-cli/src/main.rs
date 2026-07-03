@@ -8,7 +8,7 @@
 
 use std::io::Write;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand};
 use ferrus_core::copy::raw_copy;
 use ferrus_core::device::{
@@ -18,7 +18,7 @@ use ferrus_core::device::{
 use ferrus_core::partition::prepare_windows;
 use ferrus_core::progress::{ProgressSink, Stage};
 use ferrus_core::source::RawImage;
-use ferrus_core::windows::{TweakOptions, labconfig_keys};
+use ferrus_core::windows::{LocalAccountSpec, WindowsTweaks};
 
 /// Cross-platform bootable USB creator.
 #[derive(Debug, Parser)]
@@ -32,10 +32,10 @@ struct Cli {
 enum Command {
     /// List removable devices that are plausible write targets.
     List(ListArgs),
-    /// Write an image to a USB device (optionally with Windows tweaks).
+    /// Raw byte-for-byte write of an already-bootable image to a USB device.
     Write(WriteArgs),
-    /// Partition and format a device as a Windows install stick (Phase 3a:
-    /// GPT + NTFS + FAT helper; does not copy files or install a bootloader).
+    /// Build a Windows install stick: partition + format, copy the ISO, install
+    /// the UEFI:NTFS bootloader, and (opt-in) drop autounattend.xml tweaks.
     PrepareWindows(PrepareArgs),
 }
 
@@ -45,14 +45,29 @@ struct PrepareArgs {
     #[arg(long, value_name = "DEV")]
     target: std::path::PathBuf,
 
-    /// Windows install ISO to copy onto the NTFS partition (Phase 3b). Omit to
-    /// only partition + format (3a).
+    /// Windows install ISO to copy onto the NTFS partition. Omit to only
+    /// partition + format (3a).
     #[arg(long, value_name = "FILE")]
     image: Option<std::path::PathBuf>,
 
-    /// After copying, verify the install image size on the stick (Phase 3b).
+    /// After copying, verify the install image size on the stick.
     #[arg(long)]
     verify: bool,
+
+    /// Bypass the Windows 11 hardware checks (TPM / Secure Boot / RAM / storage
+    /// / CPU) via autounattend.xml. Requires --image.
+    #[arg(long)]
+    bypass_hardware: bool,
+
+    /// Create a local account with this name (no Microsoft account). Requires
+    /// --image.
+    #[arg(long, value_name = "NAME")]
+    local_account: Option<String>,
+
+    /// Password for the local account (optional). Never logged; stored only,
+    /// obfuscated, inside autounattend.xml.
+    #[arg(long, value_name = "PASS")]
+    local_password: Option<String>,
 
     /// Describe the plan without touching any device.
     #[arg(long)]
@@ -85,58 +100,6 @@ struct WriteArgs {
     /// After writing, read the device back and compare it to the image.
     #[arg(long)]
     verify: bool,
-
-    #[command(flatten)]
-    tweaks: TweakArgs,
-}
-
-/// Windows install tweaks (ignored for non-Windows images).
-#[derive(Debug, Args)]
-struct TweakArgs {
-    /// Bypass the TPM 2.0 check.
-    #[arg(long)]
-    bypass_tpm: bool,
-    /// Bypass the Secure Boot check.
-    #[arg(long)]
-    bypass_secure_boot: bool,
-    /// Bypass the minimum RAM check.
-    #[arg(long)]
-    bypass_ram: bool,
-    /// Bypass the storage check.
-    #[arg(long)]
-    bypass_storage: bool,
-    /// Bypass the supported-CPU check.
-    #[arg(long)]
-    bypass_cpu: bool,
-    /// Skip the Microsoft-account requirement during setup.
-    #[arg(long)]
-    skip_msa: bool,
-    /// Create a local account with this name (implies --skip-msa).
-    #[arg(long, value_name = "NAME")]
-    local_account: Option<String>,
-    /// Disable telemetry where the answer file allows it.
-    #[arg(long)]
-    disable_telemetry: bool,
-    /// Disable automatic BitLocker device encryption.
-    #[arg(long)]
-    disable_bitlocker: bool,
-}
-
-impl From<&TweakArgs> for TweakOptions {
-    fn from(a: &TweakArgs) -> Self {
-        Self {
-            bypass_tpm: a.bypass_tpm,
-            bypass_secure_boot: a.bypass_secure_boot,
-            bypass_ram: a.bypass_ram,
-            bypass_storage: a.bypass_storage,
-            bypass_cpu: a.bypass_cpu,
-            // A local account requires skipping the MS-account step.
-            skip_msa: a.skip_msa || a.local_account.is_some(),
-            local_account: a.local_account.clone(),
-            disable_telemetry: a.disable_telemetry,
-            disable_bitlocker: a.disable_bitlocker,
-        }
-    }
 }
 
 fn main() -> Result<()> {
@@ -156,6 +119,22 @@ fn cmd_prepare_windows(args: &PrepareArgs) -> Result<()> {
         ),
         None => None,
     };
+
+    // Build the Windows tweaks (Phase 4). The password is never echoed.
+    if args.local_password.is_some() && args.local_account.is_none() {
+        bail!("--local-password requires --local-account");
+    }
+    let tweaks = WindowsTweaks {
+        bypass_hardware: args.bypass_hardware,
+        local_account: args.local_account.as_ref().map(|name| LocalAccountSpec {
+            name: name.clone(),
+            password: args.local_password.clone(),
+        }),
+    };
+    if tweaks.any() && image.is_none() {
+        bail!("Windows tweaks (--bypass-hardware / --local-account) require --image");
+    }
+    let tweaks_opt = if tweaks.any() { Some(&tweaks) } else { None };
 
     let device = list_all_devices()
         .context("failed to enumerate devices")?
@@ -189,9 +168,29 @@ fn cmd_prepare_windows(args: &PrepareArgs) -> Result<()> {
         if target.is_dry_run() { "dry-run" } else { "REAL (destructive)" },
         if args.verify { ", verify" } else { "" },
     );
+    if tweaks.any() {
+        let mut parts = Vec::new();
+        if tweaks.bypass_hardware {
+            parts.push("hardware bypass".to_owned());
+        }
+        if let Some(account) = &tweaks.local_account {
+            parts.push(format!(
+                "local account '{}'{}",
+                account.name,
+                if account.password.is_some() {
+                    " (with password)"
+                } else {
+                    ""
+                },
+            ));
+        }
+        println!("  tweaks : {}", parts.join(", "));
+    } else {
+        println!("  tweaks : none");
+    }
 
     let mut progress = CliProgress::default();
-    prepare_windows(&target, image.as_ref(), args.verify, &mut progress)
+    prepare_windows(&target, image.as_ref(), tweaks_opt, args.verify, &mut progress)
         .context("prepare-windows failed")?;
     Ok(())
 }
@@ -255,15 +254,6 @@ fn cmd_write(args: &WriteArgs) -> Result<()> {
     let target = SafeTarget::acquire(device, &args.target, args.dry_run)
         .context("target rejected by the safety checkpoint")?;
     let device = target.device();
-
-    // Raw copy does not apply Windows install tweaks; be explicit if asked.
-    let opts = TweakOptions::from(&args.tweaks);
-    if !labconfig_keys(&opts).is_empty() || opts.local_account.is_some() {
-        eprintln!(
-            "note: Windows install tweaks are ignored by a raw image copy \
-             (that path lands in Phase 3-4)."
-        );
-    }
 
     println!("Ferrus raw write");
     println!(

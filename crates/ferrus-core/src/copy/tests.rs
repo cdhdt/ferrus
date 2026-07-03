@@ -19,6 +19,7 @@ use crate::device::{Bus, Device, SafeTarget};
 use crate::platform::{Mount, MountBackend, WriteBackend, WriteSink};
 use crate::progress::{ProgressSink, Stage};
 use crate::source::{RawImage, detect_windows_install};
+use crate::windows::WindowsTweaks;
 use crate::{Error, Result};
 
 // --- test doubles ---------------------------------------------------------
@@ -568,6 +569,7 @@ fn windows_copy_dry_run_mounts_nothing() {
         &image,
         Path::new("/dev/sda1"),
         1_000_000,
+        None,
         true,
         false,
         &mut progress,
@@ -590,6 +592,7 @@ fn windows_copy_happy_path_order_and_content() {
         &image,
         Path::new("/dev/sda1"),
         1_000_000,
+        None,
         false,
         true, // verify
         &mut progress,
@@ -606,6 +609,40 @@ fn windows_copy_happy_path_order_and_content() {
     // Files landed on the NTFS mount, case preserved.
     assert_eq!(io.dest_bytes("/ntfs/sources/install.wim"), Some(vec![7u8; 10]));
     assert!(io.dest_bytes("/ntfs/efi/boot/bootx64.efi").is_some());
+    // Opt-in: no tweaks → no autounattend.xml.
+    assert!(io.dest_bytes("/ntfs/autounattend.xml").is_none());
+}
+
+#[test]
+fn windows_copy_deposits_autounattend_when_tweaks_present() {
+    let (_f, image) = image_of(&[0u8; 16]);
+    let io = windows_tree("/iso", 10);
+    let mounts = FakeMountBackend::new();
+    let mut progress = RecordingProgress::default();
+    let tweaks = WindowsTweaks {
+        bypass_hardware: true,
+        local_account: None,
+    };
+
+    copy_windows_with(
+        &image,
+        Path::new("/dev/sda1"),
+        1_000_000,
+        Some(&tweaks),
+        false,
+        false,
+        &mut progress,
+        &mounts,
+        &io,
+    )
+    .unwrap();
+
+    let dropped = io
+        .dest_bytes("/ntfs/autounattend.xml")
+        .expect("autounattend.xml must be written to the NTFS root");
+    let xml = String::from_utf8(dropped).unwrap();
+    assert!(xml.contains(r"HKLM\SYSTEM\Setup\LabConfig"));
+    assert!(xml.contains("BypassTPMCheck"));
 }
 
 #[test]
@@ -624,6 +661,7 @@ fn windows_copy_rejects_non_windows_before_ntfs_mount() {
         &image,
         Path::new("/dev/sda1"),
         1_000_000,
+        None,
         false,
         false,
         &mut progress,
@@ -650,6 +688,7 @@ fn windows_copy_space_guard_before_ntfs_mount() {
         &image,
         Path::new("/dev/sda1"),
         100, // capacity smaller than the content
+        None,
         false,
         false,
         &mut progress,
@@ -676,6 +715,7 @@ fn windows_copy_unmounts_both_on_copy_failure() {
         &image,
         Path::new("/dev/sda1"),
         1_000_000,
+        None,
         false,
         false,
         &mut progress,

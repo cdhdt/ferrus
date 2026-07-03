@@ -135,6 +135,10 @@ pub enum Error {
         actual: String,
     },
 
+    /// The requested Windows tweaks are invalid (e.g. an empty account name).
+    #[error("invalid Windows tweaks: {0}")]
+    InvalidTweaks(String),
+
     /// The bootloader image does not fit the helper partition.
     #[error("bootloader image ({image_bytes} B) exceeds the helper partition ({partition_bytes} B)")]
     ImageExceedsPartition {
