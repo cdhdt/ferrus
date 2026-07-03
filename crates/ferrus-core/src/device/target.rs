@@ -23,19 +23,36 @@ pub fn list_all_devices() -> Result<Vec<Device>> {
     backend.enumerate_devices()
 }
 
+/// Size above which a transport-removable volume is hidden from the default
+/// listing. This is a **display** heuristic only — never a refusal — meant to
+/// keep large external backup disks out of the obvious-target list. 64 GB,
+/// decimal (matching how storage is labeled).
+pub const LARGE_TARGET_THRESHOLD_BYTES: u64 = 64 * 1000 * 1000 * 1000;
+
+/// Whether a device belongs in the default listing: a plausible target, and —
+/// unless `include_large` — not larger than [`LARGE_TARGET_THRESHOLD_BYTES`].
+///
+/// Pure display policy; it has no bearing on whether the device can be acquired.
+pub(super) fn is_default_listed(device: &Device, include_large: bool) -> bool {
+    device.is_plausible_target()
+        && (include_large || device.size_bytes <= LARGE_TARGET_THRESHOLD_BYTES)
+}
+
 /// Enumerate block devices that are plausible write targets.
 ///
-/// Non-removable devices and the system/critical devices are filtered out here
-/// so that the UI never even presents them. The returned list is meant for a
-/// human to choose from, with enough detail (size, model, bus, path) to remove
-/// ambiguity.
+/// Fixed-transport devices and the system/critical devices are filtered out so
+/// the UI never even presents them. By default, transport-removable volumes
+/// larger than [`LARGE_TARGET_THRESHOLD_BYTES`] are also hidden (a display
+/// heuristic to keep external backup disks out of the way); pass
+/// `include_large` to reveal them. The returned list carries enough detail
+/// (size, model, bus, path) to disambiguate.
 ///
 /// # Errors
 ///
 /// Returns an error if the host's device inventory cannot be read.
-pub fn list_writable_candidates() -> Result<Vec<Device>> {
+pub fn list_writable_candidates(include_large: bool) -> Result<Vec<Device>> {
     let mut devices = list_all_devices()?;
-    devices.retain(Device::is_plausible_target);
+    devices.retain(|device| is_default_listed(device, include_large));
     Ok(devices)
 }
 
@@ -46,10 +63,11 @@ pub fn list_writable_candidates() -> Result<Vec<Device>> {
 /// This is the pure decision core; [`SafeTarget::acquire`] additionally performs
 /// a live TOCTOU re-check via the platform backend.
 pub(super) fn ensure_static_guards(device: &Device, confirmed_path: &Path) -> Result<()> {
-    if !device.removable {
+    if !device.bus.is_removable_transport() {
         return Err(Error::UnsafeTarget(format!(
-            "{} is not a removable device",
-            device.path.display()
+            "{} is not a removable-transport device (bus: {})",
+            device.path.display(),
+            device.bus
         )));
     }
     if device.is_system_or_critical {

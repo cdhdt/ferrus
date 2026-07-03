@@ -27,7 +27,9 @@
 mod target;
 mod types;
 
-pub use target::{SafeTarget, list_all_devices, list_writable_candidates};
+pub use target::{
+    LARGE_TARGET_THRESHOLD_BYTES, SafeTarget, list_all_devices, list_writable_candidates,
+};
 pub use types::{Bus, Device, format_size};
 
 #[cfg(test)]

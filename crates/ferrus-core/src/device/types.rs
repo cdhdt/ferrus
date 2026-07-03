@@ -39,6 +39,16 @@ impl Bus {
             Bus::Unknown => "unknown",
         }
     }
+
+    /// Whether this transport is considered removable for target eligibility.
+    ///
+    /// This is the **reliable** removability signal (the `removable` sysfs bit
+    /// is not — see SPEC-0001). Only USB and SD/MMC transports qualify in
+    /// Phase 1.
+    #[must_use]
+    pub fn is_removable_transport(self) -> bool {
+        matches!(self, Bus::Usb | Bus::Mmc)
+    }
 }
 
 impl fmt::Display for Bus {
@@ -66,7 +76,9 @@ pub struct Device {
     pub bus: Bus,
     /// Total capacity in bytes.
     pub size_bytes: u64,
-    /// Whether the OS reports this device as removable.
+    /// Whether the OS reports this device as removable. **Display only** — this
+    /// bit is unreliable (see SPEC-0001) and is never used as a gate; eligibility
+    /// is decided by [`Bus::is_removable_transport`].
     pub removable: bool,
     /// Whether this device currently backs the running system or a mount the
     /// engine considers critical (swap, `/`, `/boot`, …). A `true` value is an
@@ -76,14 +88,16 @@ pub struct Device {
 
 impl Device {
     /// Returns `true` only if this device is, on the face of it, a plausible
-    /// write target (removable and not system/critical).
+    /// write target (removable *transport* and not system/critical).
     ///
     /// This is a **necessary but not sufficient** condition: it is a display
     /// filter for enumeration, not the authorization to write. Authorization
     /// only comes from [`SafeTarget::acquire`](super::SafeTarget::acquire).
+    /// Note it does not consider size — the default-listing size heuristic lives
+    /// in `list_writable_candidates`, not here.
     #[must_use]
     pub fn is_plausible_target(&self) -> bool {
-        self.removable && !self.is_system_or_critical
+        self.bus.is_removable_transport() && !self.is_system_or_critical
     }
 }
 

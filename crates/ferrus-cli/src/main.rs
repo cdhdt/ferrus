@@ -8,7 +8,10 @@
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand};
-use ferrus_core::device::{SafeTarget, format_size, list_all_devices, list_writable_candidates};
+use ferrus_core::device::{
+    LARGE_TARGET_THRESHOLD_BYTES, SafeTarget, format_size, list_all_devices,
+    list_writable_candidates,
+};
 use ferrus_core::windows::{TweakOptions, labconfig_keys};
 
 /// Cross-platform bootable USB creator.
@@ -22,9 +25,17 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// List removable devices that are plausible write targets.
-    List,
+    List(ListArgs),
     /// Write an image to a USB device (optionally with Windows tweaks).
     Write(WriteArgs),
+}
+
+#[derive(Debug, Args)]
+struct ListArgs {
+    /// Also show large transport-removable volumes (e.g. USB SSDs / backup
+    /// disks) that are hidden by default.
+    #[arg(long)]
+    all: bool,
 }
 
 #[derive(Debug, Args)]
@@ -98,30 +109,46 @@ impl From<&TweakArgs> for TweakOptions {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::List => cmd_list(),
+        Command::List(args) => cmd_list(&args),
         Command::Write(args) => cmd_write(&args),
     }
 }
 
-fn cmd_list() -> Result<()> {
-    let devices = list_writable_candidates().context("failed to enumerate devices")?;
+fn cmd_list(args: &ListArgs) -> Result<()> {
+    let devices = list_writable_candidates(args.all).context("failed to enumerate devices")?;
+
+    // How many plausible targets were hidden purely by the size heuristic.
+    let hidden = if args.all {
+        0
+    } else {
+        list_writable_candidates(true)
+            .map(|all| all.len().saturating_sub(devices.len()))
+            .unwrap_or(0)
+    };
+
     if devices.is_empty() {
         println!("No removable target devices found.");
-        return Ok(());
+    } else {
+        println!("{:<14} {:>9}  {:<6} {}", "DEVICE", "SIZE", "BUS", "MODEL");
+        for dev in &devices {
+            println!(
+                "{:<14} {:>9}  {:<6} {}",
+                dev.path.display(),
+                format_size(dev.size_bytes),
+                dev.bus,
+                dev.model.as_deref().unwrap_or("(unknown model)"),
+            );
+            if let Some(id) = &dev.stable_id {
+                println!("{:<14} by-id: {id}", "");
+            }
+        }
     }
 
-    println!("{:<14} {:>9}  {:<6} {}", "DEVICE", "SIZE", "BUS", "MODEL");
-    for dev in &devices {
+    if hidden > 0 {
         println!(
-            "{:<14} {:>9}  {:<6} {}",
-            dev.path.display(),
-            format_size(dev.size_bytes),
-            dev.bus,
-            dev.model.as_deref().unwrap_or("(unknown model)"),
+            "\n{hidden} large volume(s) over {} hidden; pass --all to include them.",
+            format_size(LARGE_TARGET_THRESHOLD_BYTES),
         );
-        if let Some(id) = &dev.stable_id {
-            println!("{:<14} by-id: {id}", "");
-        }
     }
     Ok(())
 }
