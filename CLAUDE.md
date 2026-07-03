@@ -143,7 +143,8 @@ cargo fmt --check
 - **Phase 0** (done): scaffolding + architecture + safety guards.
 - **Phase 1** (done): device enumeration + safe selection (Linux). See
   `docs/specs/device.md` (SPEC-0001).
-- **Phase 2**: generic ISO writing (the easy case).
+- **Phase 2** (done): generic raw image writing (the easy case). See
+  `docs/specs/write.md` (SPEC-0002).
 - **Phase 3**: Windows install media (NTFS + UEFI:NTFS + copy).
 - **Phase 4**: the differentiator — `autounattend.xml` + LabConfig generation.
 - **Phase 5**: GUI.
