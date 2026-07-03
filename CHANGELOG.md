@@ -10,6 +10,25 @@ unit tests only.
 
 ## [Unreleased]
 
+### Added
+
+- **Phase 4.x — additional Windows tweaks** (extends the `autounattend.xml`
+  generator; SPEC-0006). All **[unit]** — generated and unit-tested, not yet
+  confirmed on a real install:
+  - `minimize_telemetry`: reduce Windows diagnostic data to the edition minimum
+    (`AllowTelemetry=0`; floors to Required/Basic on Home/Pro — **not** fully off
+    — Security/Off only on Enterprise/Education/Server) plus disable advertising
+    ID, location, Find My Device and feedback notifications (machine-wide HKLM
+    policies, specialize pass). Per-user (HKCU) toggles — tailored experiences,
+    inking/typing — intentionally deferred (would be a SYSTEM-hive no-op).
+  - `disable_auto_bitlocker`: set `PreventDeviceEncryption=1` in specialize,
+    before Windows 11 24H2+ auto-encrypts partitions during setup.
+  - `region` (optional): preset UI language / system / user / input locale from a
+    BCP-47 tag (e.g. `fr-FR`) via `Microsoft-Windows-International-Core`.
+  - New CLI flags: `--minimize-telemetry`, `--disable-auto-bitlocker`,
+    `--region <TAG>`. No flag → tweak absent from the XML (Phase 3 behavior when
+    no tweak at all is selected stays unchanged).
+
 ## [0.4.0] — 2026-07-03
 
 Core milestone: Ferrus produces a bootable Windows 11 install stick with

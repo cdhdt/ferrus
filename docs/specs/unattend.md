@@ -1,4 +1,4 @@
-# SPEC-0006: autounattend.xml generation — Windows tweaks (Phase 4)
+# SPEC-0006: autounattend.xml generation — Windows tweaks (Phase 4 + 4.x)
 
 - **Status:** Implemented
 - **Module:** `crate::windows` (generator) + deposit inside `crate::copy` (3b mount)
@@ -17,14 +17,22 @@ these bypasses per build. Windows 11 **25H2 was confirmed on a real install**
 (no requirement wall; local account created without a Microsoft account) — but
 keep re-verifying per future build.
 
-## Scope (minimal core)
+## Scope
 
 DONE (Phase 4):
 - (a) **Hardware bypass**: TPM / Secure Boot / RAM / Storage / CPU checks.
 - (b) **Local account** without a Microsoft account.
 
-NOT in Phase 4 (do not widen the surface): telemetry off, auto-BitLocker off,
-regional settings. TODO(phase4.x).
+DONE (Phase 4.x):
+- (c) **Minimize telemetry / data collection** — reduce Windows diagnostic data
+  to the minimum the edition allows, plus disable advertising ID, location,
+  Find My Device and feedback notifications (all machine-wide / HKLM).
+- (d) **Disable automatic BitLocker device encryption**.
+- (e) **Regional preset** (optional) — UI language / locales / input locale.
+
+NOT in scope (do not widen the surface): any other tweak. Per-user (HKCU)
+privacy toggles are explicitly deferred — see the telemetry lever below and
+pitfalls. TODO(phase4.x+1).
 
 ## Config model
 
@@ -32,6 +40,9 @@ regional settings. TODO(phase4.x).
 WindowsTweaks {
     bypass_hardware: bool,
     local_account: Option<LocalAccountSpec { name, password: Option<String> }>,
+    minimize_telemetry: bool,
+    disable_auto_bitlocker: bool,
+    region: Option<RegionSpec { locale: String }>,   // e.g. "fr-FR"
 }
 ```
 
@@ -114,6 +125,71 @@ pass — only when a local account is requested.
 - Rationale: the local-account answer file is the primary mechanism; BypassNRO is
   belt-and-suspenders per the phase brief.
 
+### (c) Minimize telemetry / data collection — specialize pass
+
+Machine-wide (**HKLM**) policy reg-adds via `RunSynchronousCommand`
+(`Microsoft-Windows-Deployment`) in the **specialize** pass (before OOBE), so
+they are enforced for the OOBE privacy screen and the installed OS:
+
+| Setting | Key | Value |
+|---|---|---|
+| Diagnostic data | `HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection\AllowTelemetry` | `0` |
+| Advertising ID | `HKLM\SOFTWARE\Policies\Microsoft\Windows\AdvertisingInfo\DisabledByGroupPolicy` | `1` |
+| Location | `HKLM\SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors\DisableLocation` | `1` |
+| Find My Device | `HKLM\SOFTWARE\Policies\Microsoft\FindMyDevice\AllowFindMyDevice` | `0` |
+| Feedback notifications | `HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection\DoNotShowFeedbackNotifications` | `1` |
+
+- Source: Microsoft Learn, *Configure Windows diagnostic data in your
+  organization* (AllowTelemetry values 0/1/2/3; updated 2025-11-07) and *Manage
+  connections from Windows OS components to Microsoft services* (the exact
+  registry keys for advertising ID, location, Find My Device, feedback).
+  Verified 2026-07-03.
+
+- **⚠ Edition nuance — do NOT claim "telemetry off".** `AllowTelemetry=0`
+  ("Diagnostic data off / Security") is **only honored on Windows Server,
+  Enterprise and Education**. On **Home and Pro the effective floor is `1`
+  (Required / Basic)** — Windows silently raises 0 to 1. Hence the tweak is
+  named **`minimize_telemetry`** ("reduce to the edition minimum"), never
+  "disable telemetry". Quoted from the source: *"Diagnostic data off … is only
+  available on Windows Server, Windows Enterprise, and Windows Education
+  editions."*
+
+- **Deliberately NOT set here (would be a silent no-op):** the *per-user*
+  (**HKCU**) toggles — **Tailored experiences**
+  (`HKCU\…\CloudContent\DisableTailoredExperiencesWithDiagnosticData`) and
+  **Inking & typing** (`HKCU\…\InputPersonalization\RestrictImplicit*Collection`).
+  `RunSynchronous` in specialize runs as **SYSTEM**, so an HKCU write lands in
+  SYSTEM's hive, not the account created at OOBE — it would not apply. Setting
+  these correctly needs the Default-user hive or a `FirstLogonCommand`;
+  deferred. TODO(phase4.x+1). This is why the tweak is scoped to HKLM only.
+
+### (d) Disable automatic BitLocker device encryption — specialize pass
+
+`HKLM\SYSTEM\CurrentControlSet\Control\BitLocker\PreventDeviceEncryption` DWORD
+`1`, via `RunSynchronousCommand` (`Microsoft-Windows-Deployment`) in the
+**specialize** pass.
+- **Timing is the point:** since Windows 11 **24H2**, a clean install on a
+  device with TPM + Secure Boot **auto-encrypts every partition** during setup.
+  The key must exist **before** that triggers — specialize runs after image
+  apply and before OOBE, which is early enough. specialize (not oobeSystem) is
+  therefore required.
+- Source: Microsoft Learn, *BitLocker drive encryption in Windows 11 for OEMs*
+  (`PreventDeviceEncryption`); Windows OS Hub / gHacks (2024, 24H2 auto-encrypt
+  behavior + this exact key). Verified 2026-07-03.
+
+### (e) Regional preset (optional) — oobeSystem pass
+
+`Microsoft-Windows-International-Core` in the **oobeSystem** pass, driven by a
+single BCP-47 tag (`RegionSpec.locale`, e.g. `fr-FR`) applied to all four:
+`<UILanguage>`, `<SystemLocale>`, `<UserLocale>`, and `<InputLocale>`.
+- `InputLocale` accepts a language tag (uses that language's default keyboard) or
+  the `locale:KLID` hex form; Ferrus uses the plain tag for simplicity.
+- Source: Microsoft Learn, *Microsoft-Windows-International-Core* and its
+  `InputLocale` child (valid passes: oobeSystem, specialize; value formats +
+  examples). Verified 2026-07-03.
+- Scope note: only the installed-OS locale (oobeSystem). The **Setup UI** language
+  (a separate `…International-Core-WinPE` component in windowsPE) is out of scope.
+
 ## Integration
 
 The generation + deposit happen **inside the 3b copy** (P1 still mounted), after
@@ -131,9 +207,19 @@ Honors dry-run (generates nothing on disk; may report the plan).
    parseable XML with the five LabConfig `reg add`s in windowsPE, the
    LocalAccount in oobeSystem, the OOBE nodes, and the BypassNRO complement in
    specialize — the verified 25H2 values, at the right passes. *Tested.*
-4. **Secret hygiene.** A supplied password never appears in any log/stdout/error
+4. **Phase 4.x levers, nominal.** `minimize_telemetry` → the five HKLM privacy
+   reg-adds in specialize; `disable_auto_bitlocker` → `PreventDeviceEncryption`
+   in specialize; `region:Some` → International-Core with the four locale
+   elements in oobeSystem. Each off → absent. All specialize reg-adds share one
+   `Microsoft-Windows-Deployment`/`RunSynchronous` block (single `<settings
+   pass="specialize">`). *Tested.*
+5. **No Phase 4 regression.** With the same inputs, the Phase 4 output (bypass +
+   account) is byte-identical whether or not the new tweaks are toggled off.
+   *Tested.*
+6. **Secret hygiene.** A supplied password never appears in any log/stdout/error
    or `Debug` output (only, obfuscated, inside the file). *Tested.*
-5. **XML-escaped** user input (account name/display name). *Tested.*
+7. **XML-escaped** user input (account name/display name, region locale).
+   *Tested.*
 
 ## Known pitfalls
 
@@ -149,9 +235,21 @@ Honors dry-run (generates nothing on disk; may report the plan).
 - **25H2 local account** — **confirmed on a real 25H2 install** (account created,
   no Microsoft-account requirement). Microsoft actively tightens this path, so it
   may still break on a future build; re-verify per build.
+- **Telemetry is "minimized", not "off".** `AllowTelemetry=0` floors to `1`
+  (Required) on Home/Pro — only Enterprise/Education/Server honor 0. Never claim
+  full telemetry disablement to the user.
+- **HKCU in specialize is a trap.** `RunSynchronous` runs as SYSTEM; HKCU writes
+  hit SYSTEM's hive, not the OOBE-created user. That is why tailored-experiences
+  and inking/typing are deferred, not shipped as ineffective reg-adds.
+- **BitLocker timing.** `PreventDeviceEncryption` must be in **specialize**
+  (before OOBE auto-encryption on 24H2+), not oobeSystem.
+- **Phase 4.x levers are `[unit]` only** — generated and unit-tested, but **not
+  yet confirmed on a real install** (unlike the Phase 4 levers). Mark as such.
 
 ## Out of scope
 
-- Telemetry / BitLocker / regional settings (TODO phase4.x).
+- Per-user (HKCU) privacy toggles: tailored experiences, inking & typing
+  personalization — need Default-hive / FirstLogonCommand. TODO(phase4.x+1).
+- Setup UI (WinPE) display language; full silent install (disk/edition/key).
 - Fully silent install (disk/edition/product-key automation) — only the two
   levers above are in scope.
