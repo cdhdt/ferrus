@@ -23,10 +23,29 @@ use iced::widget::{button, checkbox, column, container, row, scrollable, space, 
 use iced::{Center, Element, Fill, Task, Theme};
 
 fn main() -> iced::Result {
+    announce_renderer();
     iced::application(Ferrus::boot, Ferrus::update, Ferrus::view)
         .title("Ferrus — bootable USB creator")
         .theme(theme)
         .run()
+}
+
+/// Print one line about the active renderer so a user who sees corrupted text (a
+/// wgpu glitch on some GPUs/drivers) can escape to CPU rendering without knowing
+/// iced internals.
+///
+/// iced 0.14 exposes **no programmatic backend selection** (verified against the
+/// source): the only public lever is the `ICED_BACKEND` environment variable, and
+/// `std::env::set_var` is `unsafe` under edition 2024 — which `#![forbid(unsafe_code)]`
+/// rules out — so Ferrus does not set it from code. See SPEC-0007 / README.
+fn announce_renderer() {
+    match std::env::var("ICED_BACKEND") {
+        Ok(backend) => eprintln!("ferrus-gui: renderer backend = {backend} (via ICED_BACKEND)"),
+        Err(_) => eprintln!(
+            "ferrus-gui: rendering with the GPU (wgpu). If text or glyphs look \
+             corrupted, rerun with  ICED_BACKEND=tiny-skia  for CPU rendering."
+        ),
+    }
 }
 
 /// Fixed theme. A free `fn` (not a closure) so it satisfies the `for<'a>`

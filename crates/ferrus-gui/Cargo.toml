@@ -17,7 +17,13 @@ path = "src/main.rs"
 ferrus-core = { path = "../ferrus-core" }
 # GUI framework: iced (ADR-0001). Versions verified against crates.io, not from
 # memory: iced 0.14 is the latest stable (functional application API).
-iced = "0.14"
+#
+# Both renderers are pinned explicitly: `wgpu` (GPU, default) and `tiny-skia`
+# (CPU/software fallback). tiny-skia MUST stay compiled — it is the escape hatch
+# for GPUs/drivers that glitch text under wgpu (SPEC-0007), reachable via the
+# ICED_BACKEND=tiny-skia environment variable. Both are already in iced's default
+# features; listing them makes the intent load-bearing, not incidental.
+iced = { version = "0.14", features = ["wgpu", "tiny-skia"] }
 # Native file picker. rfd 0.17's default Linux backend is xdg-portal (pure Rust,
 # no GTK build dependency); the desktop portal provides the dialog at runtime.
 rfd = "0.17"
