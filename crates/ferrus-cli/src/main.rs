@@ -193,7 +193,7 @@ fn cmd_prepare_windows(args: &PrepareArgs) -> Result<()> {
         println!("  tweaks : none");
     }
 
-    let mut progress = CliProgress::default();
+    let mut progress = CliProgress;
     prepare_windows(
         &target,
         image.as_ref(),
@@ -220,7 +220,7 @@ fn cmd_list(args: &ListArgs) -> Result<()> {
     if devices.is_empty() {
         println!("No removable target devices found.");
     } else {
-        println!("{:<14} {:>9}  {:<6} {}", "DEVICE", "SIZE", "BUS", "MODEL");
+        println!("{:<14} {:>9}  {:<6} MODEL", "DEVICE", "SIZE", "BUS");
         for dev in &devices {
             println!(
                 "{:<14} {:>9}  {:<6} {}",
@@ -287,7 +287,7 @@ fn cmd_write(args: &WriteArgs) -> Result<()> {
         if args.verify { ", verify" } else { "" },
     );
 
-    let mut progress = CliProgress::default();
+    let mut progress = CliProgress;
     raw_copy(&image, &target, args.verify, &mut progress).context("write failed")?;
     Ok(())
 }
