@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: fmt · clippy · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins Rust 1.94.1 with the clippy and rustfmt
+      # components; rustup on the runner honors it (installs on first use).
+      - name: Show toolchain
+        run: rustup show active-toolchain || rustup show
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format (all crates)
+        run: cargo fmt --all --check
+
+      # ferrus-gui is a Phase 0 placeholder whose only real dependency (eframe)
+      # pulls native GUI system libraries. To keep CI hermetic and green without
+      # guessing an apt package list, lint and test the engine + CLI — where all
+      # the logic and the 65 tests live. Add a GUI job (with its system deps)
+      # when Phase 5 begins.
+      - name: Clippy (deny warnings)
+        run: cargo clippy -p ferrus-core -p ferrus-cli --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test -p ferrus-core -p ferrus-cli
