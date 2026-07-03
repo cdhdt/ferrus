@@ -1,6 +1,6 @@
 # SPEC-0004: copy Windows ISO contents onto the NTFS partition (Phase 3b)
 
-- **Status:** Accepted
+- **Status:** Implemented
 - **Module:** `crate::copy` (+ `crate::source`) + Linux backend in
   `crate::platform::linux`
 - **Linked ADRs:** ADR-0002 (UEFI:NTFS), ADR-0005 (NTFS write driver)

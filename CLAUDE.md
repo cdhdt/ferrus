@@ -140,13 +140,36 @@ cargo fmt --check
 
 ## Roadmap
 
-- **Phase 0** (done): scaffolding + architecture + safety guards.
-- **Phase 1** (done): device enumeration + safe selection (Linux). See
-  `docs/specs/device.md` (SPEC-0001).
-- **Phase 2** (done): generic raw image writing (the easy case). See
-  `docs/specs/write.md` (SPEC-0002).
-- **Phase 3**: Windows install media (NTFS + UEFI:NTFS + copy).
-- **Phase 4**: the differentiator — `autounattend.xml` + LabConfig generation.
-- **Phase 5**: GUI.
+**Core validated on real hardware through Windows 11 25H2** (boot + hardware
+bypass + local account without MSA). A Ferrus-made stick boots via the signed
+UEFI:NTFS loader, gets past the Windows 11 requirement checks on a TPM-less VM,
+and creates a local account without a Microsoft account — observed on a real
+25H2 Setup run, not assumed.
+
+Proof level is called out per phase: **[real]** = exercised on real hardware;
+**[unit]** = covered by unit tests only.
+
+- **Phase 0** (done): scaffolding + architecture + safety guards. — **[unit]**
+- **Phase 1** (done): device enumeration + safe selection (Linux),
+  `docs/specs/device.md` (SPEC-0001). — **[unit]** + enumeration/refusal
+  exercised on the real host.
+- **Phase 2** (done): generic raw image writing, `docs/specs/write.md`
+  (SPEC-0002). — **[real]**: Alpine ISO written to a USB device and booted in
+  QEMU; unmount + O_EXCL + fsync + read-back verify exercised.
+- **Phase 3** (done): Windows install media — GPT + NTFS/FAT (3a),
+  ISO file copy (3b), UEFI:NTFS bootloader (3c). `docs/specs/partition-format.md`
+  (SPEC-0003), `docs/specs/copy-windows.md` (SPEC-0004),
+  `docs/specs/bootloader.md` (SPEC-0005); ADR-0002/0004/0005. — **[real]**: a
+  real Windows 11 25H2 ISO written (copy byte-identical to the ISO) and booted
+  to Windows Setup via the signed UEFI:NTFS loader.
+- **Phase 4** (done): the differentiator — `autounattend.xml` (hardware bypass +
+  local account), `docs/specs/unattend.md` (SPEC-0006). — **[real]**: generator
+  unit-tested; validated on a real Windows 11 25H2 install — no TPM wall, local
+  account created without a Microsoft account.
+- **Phase 5**: GUI (iced — ADR-0001).
 - **Phase 6**: Windows port.
 - **Phase 7**: macOS port.
+
+Not yet done / known gaps: no GUI; Linux-only; UEFI/GPT only (no legacy BIOS);
+telemetry/BitLocker/regional tweaks not implemented (phase 4.x);
+`cargo clippy`/`cargo fmt` not yet run project-wide (tracked separately).

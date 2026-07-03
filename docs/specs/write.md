@@ -1,6 +1,6 @@
 # SPEC-0002: raw image write
 
-- **Status:** Accepted
+- **Status:** Implemented
 - **Module:** `crate::copy` (orchestration + stream) + `crate::source` (image) +
   Linux backend in `crate::platform::linux`
 - **Linked ADRs:** ADR-0003 (privilege elevation)

@@ -1,6 +1,6 @@
 # SPEC-0003: partition + format for Windows install media (Phase 3a)
 
-- **Status:** Accepted
+- **Status:** Implemented
 - **Module:** `crate::partition` (+ `crate::format`) + Linux backend in
   `crate::platform::linux`
 - **Linked ADRs:** ADR-0002 (UEFI:NTFS vendoring), ADR-0004 (sfdisk vs GPT crate)

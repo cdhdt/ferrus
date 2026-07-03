@@ -4,8 +4,38 @@ Cross-platform bootable USB creator — write any ISO, with Rufus-style tweaks f
 Windows installs (skip TPM, Secure Boot, RAM checks and the Microsoft account
 requirement). Written in Rust.
 
-> **Status:** early development, Linux-only for now. Windows and macOS support
-> planned.
+> **Status:** the engine works end-to-end on Linux and is CLI-only for now. No
+> GUI yet; Windows and macOS ports are planned.
+
+## Status
+
+**What Ferrus does today (Linux, CLI):**
+
+- Writes any already-bootable ISO raw to a USB device (`ferrus write`) — verified
+  on real hardware (an Alpine ISO written and booted).
+- Builds a **bootable Windows 11 install stick** (`ferrus prepare-windows`):
+  GPT + NTFS/FAT layout, copies the ISO, and installs the signed **UEFI:NTFS**
+  bootloader — verified on real hardware with a Windows 11 25H2 ISO.
+- Generates and drops an **`autounattend.xml`** to **bypass the Windows 11
+  hardware checks** (TPM / Secure Boot / RAM / storage / CPU) and **create a
+  local account without a Microsoft account** — verified on a real Windows 11
+  **25H2** install (no requirement wall, local account created, no MSA).
+- Safety first: refuses non-removable / system disks, requires an exact target
+  path, real `--dry-run`, and a single tested checkpoint before any write.
+
+Example — build a Windows 11 install stick with the tweaks:
+
+```sh
+ferrus list
+sudo ferrus prepare-windows --target /dev/sdX --image Win11.iso \
+     --bypass-hardware --local-account myname --local-password 'secret'
+```
+
+**What does NOT exist yet:**
+
+- No GUI (planned, iced — see `docs/adr/0001-gui-framework.md`).
+- Linux only; UEFI/GPT only (no legacy BIOS boot).
+- No telemetry / BitLocker / regional-settings tweaks yet.
 
 ## How it works
 

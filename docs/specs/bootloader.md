@@ -1,6 +1,6 @@
 # SPEC-0005: UEFI:NTFS bootloader — make the Windows stick bootable (Phase 3c)
 
-- **Status:** Accepted
+- **Status:** Implemented
 - **Module:** `crate::boot` + Linux backend in `crate::platform::linux`
 - **Linked ADRs:** ADR-0002 (UEFI:NTFS vendoring — this spec resolves it)
 - **Linked specs:** SPEC-0002 (block write + O_EXCL + fsync reused), SPEC-0003

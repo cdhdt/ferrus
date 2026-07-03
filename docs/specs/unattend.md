@@ -1,6 +1,6 @@
 # SPEC-0006: autounattend.xml generation — Windows tweaks (Phase 4)
 
-- **Status:** Accepted
+- **Status:** Implemented
 - **Module:** `crate::windows` (generator) + deposit inside `crate::copy` (3b mount)
 - **Linked specs:** SPEC-0004 (the P1 mount this drops the file into)
 - **Verification date:** all sources below checked **2026-07-03**.
@@ -13,8 +13,9 @@ Setup reads it automatically. This is the project's core differentiator.
 
 **Discipline:** every registry key, XML element and value below carries its
 source and verification date. Nothing is hardcoded from memory. Windows tightens
-these bypasses per build — treat Windows 11 **25H2** as *to be confirmed on a
-real run*, not assumed.
+these bypasses per build. Windows 11 **25H2 was confirmed on a real install**
+(no requirement wall; local account created without a Microsoft account) — but
+keep re-verifying per future build.
 
 ## Scope (minimal core)
 
@@ -69,9 +70,9 @@ compatibility gate**, so they are written by a `RunSynchronousCommand` in the
 - Source: long-standing community method (elevenforum "bypass Windows 11
   hardware requirements for clean installs"; iamroot.it 2021; woshub). Confirmed
   the `labconfig_keys()` names from Phase 0 are still correct. Verified 2026-07-03.
-- **To confirm on a real 25H2 run:** that these still gate the clean-install
-  compat check on 25H2 (the method is unchanged across 22H2/24H2; 25H2 not yet
-  hardware-tested here).
+- **Confirmed on a real 25H2 install:** the LabConfig bypass gets past the
+  clean-install requirement check on 25H2 (no "This PC can't run Windows 11"
+  wall on a TPM-less VM). Method unchanged across 22H2/24H2/25H2.
 
 ### (b) Local account — oobeSystem pass
 
@@ -145,8 +146,9 @@ Honors dry-run (generates nothing on disk; may report the plan).
 - **Password is reversible.** `PlainText=false` is base64 obfuscation, not
   encryption; the file persists on the stick. Never log the plaintext; treat the
   file as containing a recoverable secret.
-- **25H2 local account** — Microsoft actively tightens this; the method is the
-  best-reported one but is **unconfirmed on a real 25H2 install here**.
+- **25H2 local account** — **confirmed on a real 25H2 install** (account created,
+  no Microsoft-account requirement). Microsoft actively tightens this path, so it
+  may still break on a future build; re-verify per build.
 
 ## Out of scope
 

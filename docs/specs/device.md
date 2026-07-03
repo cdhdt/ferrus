@@ -1,6 +1,6 @@
 # SPEC-0001: `device` — enumeration and safe target selection
 
-- **Status:** Accepted
+- **Status:** Implemented
 - **Module:** `crate::device` (+ Linux backend in `crate::platform::linux`)
 - **Linked ADRs:** ADR-0003 (privilege elevation)
 
