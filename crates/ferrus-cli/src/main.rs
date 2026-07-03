@@ -165,7 +165,11 @@ fn cmd_prepare_windows(args: &PrepareArgs) -> Result<()> {
     }
     println!(
         "  mode   : {}{}",
-        if target.is_dry_run() { "dry-run" } else { "REAL (destructive)" },
+        if target.is_dry_run() {
+            "dry-run"
+        } else {
+            "REAL (destructive)"
+        },
         if args.verify { ", verify" } else { "" },
     );
     if tweaks.any() {
@@ -190,8 +194,14 @@ fn cmd_prepare_windows(args: &PrepareArgs) -> Result<()> {
     }
 
     let mut progress = CliProgress::default();
-    prepare_windows(&target, image.as_ref(), tweaks_opt, args.verify, &mut progress)
-        .context("prepare-windows failed")?;
+    prepare_windows(
+        &target,
+        image.as_ref(),
+        tweaks_opt,
+        args.verify,
+        &mut progress,
+    )
+    .context("prepare-windows failed")?;
     Ok(())
 }
 
@@ -269,7 +279,11 @@ fn cmd_write(args: &WriteArgs) -> Result<()> {
     );
     println!(
         "  mode   : {}{}",
-        if target.is_dry_run() { "dry-run" } else { "REAL WRITE" },
+        if target.is_dry_run() {
+            "dry-run"
+        } else {
+            "REAL WRITE"
+        },
         if args.verify { ", verify" } else { "" },
     );
 

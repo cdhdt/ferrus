@@ -22,9 +22,7 @@ use crate::device::Device;
 use crate::platform::Backend;
 
 use mounts::{RealBlockFs, build_system_disk_set};
-use sysfs::{
-    bus_from_syspath, flag_is_true, is_virtual_name, pick_stable_id, size_from_sectors,
-};
+use sysfs::{bus_from_syspath, flag_is_true, is_virtual_name, pick_stable_id, size_from_sectors};
 
 /// Linux implementation of [`Backend`].
 #[derive(Debug, Default)]

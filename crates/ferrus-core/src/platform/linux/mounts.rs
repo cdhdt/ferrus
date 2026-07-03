@@ -93,7 +93,11 @@ fn collect_backing_disks(name: &str, fs: &dyn BlockFs, out: &mut BTreeSet<String
 
 /// Build the set of physical disk names that back the system, from the contents
 /// of `/proc/mounts` and `/proc/swaps`.
-pub(super) fn build_system_disk_set(mounts: &str, swaps: &str, fs: &dyn BlockFs) -> BTreeSet<String> {
+pub(super) fn build_system_disk_set(
+    mounts: &str,
+    swaps: &str,
+    fs: &dyn BlockFs,
+) -> BTreeSet<String> {
     let mut disks = BTreeSet::new();
 
     for line in mounts.lines() {

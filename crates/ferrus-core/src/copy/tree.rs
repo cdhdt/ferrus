@@ -71,13 +71,18 @@ pub(crate) fn scan(io: &dyn TreeIo, root: &Path) -> Result<Scan> {
 
 fn scan_dir(io: &dyn TreeIo, root: &Path, dir: &Path, scan: &mut Scan, depth: u32) -> Result<()> {
     if depth > MAX_DEPTH {
-        return Err(Error::InvalidSource("directory nesting too deep".to_owned()));
+        return Err(Error::InvalidSource(
+            "directory nesting too deep".to_owned(),
+        ));
     }
     for entry in io.read_dir(dir)? {
         if entry.is_dir {
             scan_dir(io, root, &entry.path, scan, depth + 1)?;
         } else {
-            let rel = entry.path.strip_prefix(root).unwrap_or(entry.path.as_path());
+            let rel = entry
+                .path
+                .strip_prefix(root)
+                .unwrap_or(entry.path.as_path());
             let key = rel_key(rel);
             scan.original_of.insert(key.clone(), rel.to_path_buf());
             scan.files.insert(key, entry.size);
@@ -125,7 +130,9 @@ fn copy_dir(
     depth: u32,
 ) -> Result<()> {
     if depth > MAX_DEPTH {
-        return Err(Error::InvalidSource("directory nesting too deep".to_owned()));
+        return Err(Error::InvalidSource(
+            "directory nesting too deep".to_owned(),
+        ));
     }
     io.create_dir(dst_dir)?;
     for entry in io.read_dir(src_dir)? {

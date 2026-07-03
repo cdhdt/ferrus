@@ -29,10 +29,7 @@ impl std::fmt::Debug for LocalAccountSpec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LocalAccountSpec")
             .field("name", &self.name)
-            .field(
-                "password",
-                &self.password.as_ref().map(|_| "<redacted>"),
-            )
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
             .finish()
     }
 }
@@ -122,7 +119,10 @@ fn push_windowspe_bypass(xml: &mut String, profile: &BuildProfile) {
             format!(r#"reg add "HKLM\SYSTEM\Setup\LabConfig" /v {key} /t REG_DWORD /d 1 /f"#);
         xml.push_str("        <RunSynchronousCommand wcm:action=\"add\">\n");
         xml.push_str(&format!("          <Order>{order}</Order>\n"));
-        xml.push_str(&format!("          <Path>{}</Path>\n", escape_text(&command)));
+        xml.push_str(&format!(
+            "          <Path>{}</Path>\n",
+            escape_text(&command)
+        ));
         xml.push_str("        </RunSynchronousCommand>\n");
     }
     xml.push_str("      </RunSynchronous>\n");
@@ -136,7 +136,10 @@ fn push_specialize_bypassnro(xml: &mut String) {
     xml.push_str("      <RunSynchronous>\n");
     xml.push_str("        <RunSynchronousCommand wcm:action=\"add\">\n");
     xml.push_str("          <Order>1</Order>\n");
-    xml.push_str(&format!("          <Path>{}</Path>\n", escape_text(command)));
+    xml.push_str(&format!(
+        "          <Path>{}</Path>\n",
+        escape_text(command)
+    ));
     xml.push_str("        </RunSynchronousCommand>\n");
     xml.push_str("      </RunSynchronous>\n");
     component_close(xml);
@@ -185,7 +188,9 @@ fn obfuscate_password(password: &str) -> String {
 
 /// Escape XML text content (`&`, `<`, `>`).
 fn escape_text(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 #[cfg(test)]

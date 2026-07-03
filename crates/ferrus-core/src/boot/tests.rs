@@ -166,7 +166,10 @@ fn install_rejects_tampered_hash_without_writing() {
     .unwrap_err();
 
     assert!(matches!(err, Error::BootloaderIntegrity { .. }));
-    assert!(!backend.opened.get(), "must not open the device on a hash mismatch");
+    assert!(
+        !backend.opened.get(),
+        "must not open the device on a hash mismatch"
+    );
     assert!(backend.written.borrow().is_empty());
 }
 

@@ -51,7 +51,10 @@ fn bus_inference_from_syspath() {
         bus_from_syspath("/sys/devices/virtual/block/dm-0"),
         Bus::Unknown
     );
-    assert_eq!(bus_from_syspath("/sys/devices/scsi_host/.../sdc"), Bus::Scsi);
+    assert_eq!(
+        bus_from_syspath("/sys/devices/scsi_host/.../sdc"),
+        Bus::Scsi
+    );
 }
 
 #[test]
@@ -168,7 +171,10 @@ fn effective_uid_is_the_second_uid_field() {
 #[test]
 fn octal_escapes_are_decoded() {
     assert_eq!(unescape_octal("/mnt/plain"), "/mnt/plain");
-    assert_eq!(unescape_octal(r"/run/media/My\040Stick"), "/run/media/My Stick");
+    assert_eq!(
+        unescape_octal(r"/run/media/My\040Stick"),
+        "/run/media/My Stick"
+    );
     assert_eq!(unescape_octal(r"/a\011b"), "/a\tb");
     // A lone backslash not starting a valid escape is left as-is.
     assert_eq!(unescape_octal(r"/a\z"), r"/a\z");
@@ -183,7 +189,10 @@ fn mountpoints_backed_by_finds_target_partitions() {
 tmpfs /tmp tmpfs rw 0 0
 ";
     let mps = mountpoints_backed_by(mounts, "sdz", &FakeBlockFs);
-    assert_eq!(mps, vec!["/run/media/My Stick".to_owned(), "/mnt/data".to_owned()]);
+    assert_eq!(
+        mps,
+        vec!["/run/media/My Stick".to_owned(), "/mnt/data".to_owned()]
+    );
     // A disk with nothing mounted yields nothing.
     assert!(mountpoints_backed_by(mounts, "sdq", &FakeBlockFs).is_empty());
 }

@@ -37,10 +37,7 @@ impl RawImage {
         }
         let size_bytes = meta.len();
         if size_bytes == 0 {
-            return Err(Error::InvalidSource(format!(
-                "{} is empty",
-                path.display()
-            )));
+            return Err(Error::InvalidSource(format!("{} is empty", path.display())));
         }
         Ok(Self {
             path: path.to_path_buf(),
@@ -109,4 +106,3 @@ pub fn detect_windows_install(
         None
     }
 }
-

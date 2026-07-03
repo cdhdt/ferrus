@@ -447,7 +447,10 @@ fn windows_tree(root: &str, wim_size: usize) -> FakeTreeIo {
     );
     let mut contents = BTreeMap::new();
     contents.insert(root.join("bootmgr"), vec![1u8; 4]);
-    contents.insert(root.join("sources").join("install.wim"), vec![7u8; wim_size]);
+    contents.insert(
+        root.join("sources").join("install.wim"),
+        vec![7u8; wim_size],
+    );
     contents.insert(
         root.join("efi").join("boot").join("bootx64.efi"),
         vec![9u8; 6],
@@ -484,7 +487,14 @@ fn copy_tree_preserves_structure_case_and_streams_large_files() {
 
     let total = 3 + big as u64;
     let mut progress = RecordingProgress::default();
-    let copied = copy_tree(&io, Path::new("/src"), Path::new("/dst"), total, &mut progress).unwrap();
+    let copied = copy_tree(
+        &io,
+        Path::new("/src"),
+        Path::new("/dst"),
+        total,
+        &mut progress,
+    )
+    .unwrap();
 
     assert_eq!(copied, total);
     // Case and structure preserved verbatim.
@@ -604,10 +614,19 @@ fn windows_copy_happy_path_order_and_content() {
     // Mounts, sync, then RAII unmount of ntfs (declared last) before iso.
     assert_eq!(
         *mounts.log.borrow(),
-        vec!["mount_iso", "mount_ntfs", "sync", "umount:ntfs", "umount:iso"]
+        vec![
+            "mount_iso",
+            "mount_ntfs",
+            "sync",
+            "umount:ntfs",
+            "umount:iso"
+        ]
     );
     // Files landed on the NTFS mount, case preserved.
-    assert_eq!(io.dest_bytes("/ntfs/sources/install.wim"), Some(vec![7u8; 10]));
+    assert_eq!(
+        io.dest_bytes("/ntfs/sources/install.wim"),
+        Some(vec![7u8; 10])
+    );
     assert!(io.dest_bytes("/ntfs/efi/boot/bootx64.efi").is_some());
     // Opt-in: no tweaks → no autounattend.xml.
     assert!(io.dest_bytes("/ntfs/autounattend.xml").is_none());
@@ -653,7 +672,8 @@ fn windows_copy_rejects_non_windows_before_ntfs_mount() {
         PathBuf::from("/iso"),
         vec![("readme.txt".to_owned(), false, 5)],
     );
-    io.contents.insert(PathBuf::from("/iso/readme.txt"), vec![0u8; 5]);
+    io.contents
+        .insert(PathBuf::from("/iso/readme.txt"), vec![0u8; 5]);
     let mounts = FakeMountBackend::new();
     let mut progress = RecordingProgress::default();
 

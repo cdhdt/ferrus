@@ -52,7 +52,10 @@ fn internal_fixed_disk_is_refused_on_transport() {
         let dev = device("/dev/nvme0n1", bus, false);
         let path = dev.path.clone();
         let err = ensure_static_guards(&dev, &path).unwrap_err();
-        assert!(matches!(err, Error::UnsafeTarget(_)), "bus {bus} should be refused");
+        assert!(
+            matches!(err, Error::UnsafeTarget(_)),
+            "bus {bus} should be refused"
+        );
     }
 }
 

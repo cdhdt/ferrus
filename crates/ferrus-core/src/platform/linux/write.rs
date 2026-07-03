@@ -32,7 +32,8 @@ pub(super) fn parse_effective_uid(status: &str) -> Option<u32> {
 /// Read the process's effective UID. Shared by the write and partition backends.
 pub(super) fn read_effective_uid() -> Result<u32> {
     let status = std::fs::read_to_string("/proc/self/status")?;
-    parse_effective_uid(&status).ok_or_else(|| io::Error::other("could not parse effective uid").into())
+    parse_effective_uid(&status)
+        .ok_or_else(|| io::Error::other("could not parse effective uid").into())
 }
 
 /// Mountpoints of partitions currently mounted from `device_path`.

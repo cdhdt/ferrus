@@ -120,8 +120,7 @@ pub(super) fn copy_windows_with(
         && tweaks.any()
     {
         progress.message("writing autounattend.xml (Windows tweaks)");
-        let xml =
-            crate::windows::generate_autounattend(tweaks, crate::windows::default_profile())?;
+        let xml = crate::windows::generate_autounattend(tweaks, crate::windows::default_profile())?;
         let dest = ntfs.path().join(crate::windows::AUTOUNATTEND_FILENAME);
         let mut writer = io.open_write(&dest)?;
         writer.write_all(xml.as_bytes())?;

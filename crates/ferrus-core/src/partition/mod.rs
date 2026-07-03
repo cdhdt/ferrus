@@ -88,8 +88,14 @@ pub fn prepare_windows(
         let layout = compute_windows_layout(target.device().size_bytes)?;
         let dev = &target.device().path;
         // In dry-run there are no real nodes; fall back to the intended paths.
-        let p1 = nodes.first().cloned().unwrap_or_else(|| partition_path(dev, 1));
-        let p2 = nodes.get(1).cloned().unwrap_or_else(|| partition_path(dev, 2));
+        let p1 = nodes
+            .first()
+            .cloned()
+            .unwrap_or_else(|| partition_path(dev, 1));
+        let p2 = nodes
+            .get(1)
+            .cloned()
+            .unwrap_or_else(|| partition_path(dev, 2));
 
         // 3b: copy the Windows files onto P1 (NTFS), plus autounattend.xml (Ph.4).
         crate::copy::copy_windows(

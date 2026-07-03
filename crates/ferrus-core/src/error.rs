@@ -140,7 +140,9 @@ pub enum Error {
     InvalidTweaks(String),
 
     /// The bootloader image does not fit the helper partition.
-    #[error("bootloader image ({image_bytes} B) exceeds the helper partition ({partition_bytes} B)")]
+    #[error(
+        "bootloader image ({image_bytes} B) exceeds the helper partition ({partition_bytes} B)"
+    )]
     ImageExceedsPartition {
         /// Size of the bootloader image in bytes.
         image_bytes: u64,

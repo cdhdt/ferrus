@@ -67,7 +67,10 @@ fn sfdisk_script_is_gpt_with_both_partitions() {
 
 #[test]
 fn partition_paths_handle_sd_and_nvme() {
-    assert_eq!(partition_path(Path::new("/dev/sda"), 1), Path::new("/dev/sda1"));
+    assert_eq!(
+        partition_path(Path::new("/dev/sda"), 1),
+        Path::new("/dev/sda1")
+    );
     assert_eq!(
         partition_path(Path::new("/dev/nvme0n1"), 2),
         Path::new("/dev/nvme0n1p2")
@@ -136,7 +139,9 @@ impl PartitionBackend for FakeBackend {
     }
     fn wait_for_partitions(&self, device_path: &Path, count: usize) -> Result<Vec<PathBuf>> {
         self.record("wait");
-        Ok((1..=count).map(|i| partition_path(device_path, i)).collect())
+        Ok((1..=count)
+            .map(|i| partition_path(device_path, i))
+            .collect())
     }
     fn make_filesystem(&self, partition_path: &Path, fs: FsKind, _label: &str) -> Result<()> {
         self.record(format!("mkfs:{fs:?}:{}", partition_path.display()));

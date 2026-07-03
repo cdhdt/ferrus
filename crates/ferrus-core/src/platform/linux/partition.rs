@@ -11,9 +11,9 @@ use std::process::{Command, Stdio};
 use std::thread::sleep;
 use std::time::Duration;
 
+use super::LinuxBackend;
 use super::disk_is_system_or_critical;
 use super::write::{list_mounted_partitions, read_effective_uid, run_umount};
-use super::LinuxBackend;
 use crate::partition::{FsKind, partition_path};
 use crate::platform::PartitionBackend;
 use crate::{Error, Result};
@@ -48,10 +48,7 @@ fn mkfs_command(fs: FsKind, partition_path: &Path, label: &str) -> (&'static str
                 path,
             ],
         ),
-        FsKind::Fat => (
-            "mkfs.vfat",
-            vec!["-n".to_owned(), label.to_owned(), path],
-        ),
+        FsKind::Fat => ("mkfs.vfat", vec!["-n".to_owned(), label.to_owned(), path]),
     }
 }
 
@@ -146,7 +143,9 @@ impl PartitionBackend for LinuxBackend {
     }
 
     fn wait_for_partitions(&self, device_path: &Path, count: usize) -> Result<Vec<PathBuf>> {
-        let expected: Vec<PathBuf> = (1..=count).map(|i| partition_path(device_path, i)).collect();
+        let expected: Vec<PathBuf> = (1..=count)
+            .map(|i| partition_path(device_path, i))
+            .collect();
 
         // Nudge udev, then poll for the nodes (bounded ~5 s).
         let _ = Command::new("udevadm")
