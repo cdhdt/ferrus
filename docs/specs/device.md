@@ -21,7 +21,10 @@ later phases and stay stubs. Enumeration here is strictly read-only.
    writing is a `SafeTarget`, and the only way to build one is
    `SafeTarget::acquire`. Encoded in the type system (private fields, no public
    constructor). *Tested:* the acquire refusal/accept tests.
-2. **Never authorize a non-removable device.** *Tested:* refusal test.
+2. **Never authorize a fixed-transport device.** Eligibility is decided on the
+   *transport bus* (removable ⇔ `bus ∈ {Usb, Mmc}`), which is reliable, NOT on
+   the `/sys/block/<dev>/removable` bit, which is not. *Tested:* an internal
+   NVMe/SATA disk is refused; a USB device with `removable == 0` is accepted.
 3. **Never authorize a device that backs the running system or a critical mount**
    (`/`, `/boot`, `/boot/efi`, swap, and other essential OS mounts). *Tested:*
    refusal test with a device flagged system/critical.
@@ -35,27 +38,41 @@ later phases and stay stubs. Enumeration here is strictly read-only.
 
 ## Behavior
 
-### What "removable" means on Linux, and why it is not enough
+### Eligibility is decided on transport, not on the `removable` bit
 
-`/sys/block/<dev>/removable` is a single bit and is **not reliable on its own**:
+`/sys/block/<dev>/removable` is a single bit and is **not reliable**: many USB
+sticks and virtually all USB-SSDs / USB-bridged drives report `removable = 0`.
+Gating on it does the one thing this tool must never do — it **hides real USB
+targets and refuses to write them**. It is therefore NOT a gate. `removable` is
+kept only as a secondary *display* field.
 
-- Many USB SSDs and USB-bridged drives report `removable = 0`. Trusting the bit
-  alone would hide legitimate targets and, worse, could surface a data drive as
-  a target if the bit were wrong the other way.
-- An external USB disk may be a *precious backup*, not a scratch stick — the tool
-  must still show size/model/bus so the human can tell them apart. Ferrus does
-  not silently decide a big USB disk is fair game.
+The reliable signal is the **transport bus**, read from the sysfs device-tree
+topology (the realpath of `/sys/block/<dev>`), which mirrors `lsblk`'s `TRAN`:
 
-So Ferrus treats `removable = 1` as the primary *display* filter but layers the
-system/critical-mount check underneath as an independent guard (invariant 3), so
-a mislabeled device that backs the OS is still refused.
+- contains `/usb` → USB, `/nvme` → NVMe, `/ata` → SATA/ATA, `/mmc` → MMC/SD,
+  `/virtual/` → virtual (excluded entirely), otherwise SCSI/Unknown.
 
-Bus is derived independently of the `removable` bit, by inspecting the sysfs
-device path (the realpath of `/sys/block/<dev>`):
+A device is **transport-removable** when `bus ∈ {Usb, Mmc}`. Target eligibility
+is exactly:
 
-- contains `/usb` → USB, `/nvme/` → NVMe, `/ata` or `/ata` host → SATA/ATA,
-  `/mmc` → MMC/SD, otherwise SCSI/Unknown.
-- contains `/virtual/` → virtual; excluded entirely (see pitfalls).
+> `bus ∈ {Usb, Mmc}` **and** not system/critical.
+
+The system/critical-mount check (invariant 3, below) is an independent hard gate
+underneath: even a USB-transport device that backs the OS is still refused.
+
+#### Irreducible residue (accepted limitation)
+
+An external USB *backup* disk shares its transport with a scratch USB stick —
+there is **no reliable signal that separates them**. Ferrus does not pretend to.
+Instead:
+
+- Large USB/MMC volumes (over a documented size threshold) are **hidden from the
+  default listing** — a pure *display* heuristic, never a refusal — and revealed
+  with `--all` / `include_large`.
+- The **exact confirmed-path** precondition (invariant 4 / acquire #3) is the
+  last line of defense: the user must echo back the precise `/dev/<name>` they
+  intend to erase, so a hidden-but-targeted backup disk can still be written on
+  purpose, but never by a slip.
 
 ### Exclusions (never even enumerated as candidates)
 
@@ -93,11 +110,16 @@ can span several). Any enumerated disk in that set is `is_system_or_critical`.
 
 Preconditions (all required, checked in this order; first failure wins):
 
-1. `device.removable == true` — else `UnsafeTarget`.
+1. **Transport is removable** (`bus ∈ {Usb, Mmc}`) — else `UnsafeTarget`. (NOT
+   the `removable` bit; see above.)
 2. `device.is_system_or_critical == false` — else `UnsafeTarget`.
 3. `confirmed_path == device.path` — else `UnsafeTarget`.
 4. Live re-check: backend reports the device is not currently system/critical —
    else `UnsafeTarget`.
+
+Note the size threshold plays **no** part here: it only filters the default
+*listing*. A large USB volume that is hidden by default is still fully
+acquirable when explicitly targeted and confirmed.
 
 Guarantees on success: the returned `SafeTarget` wraps the device and the
 `dry_run` flag; possessing it means all four checks passed. It is the only type
@@ -111,9 +133,21 @@ and bus. A **stable** `/dev/disk/by-id/*` name is resolved best-effort and shown
 when available, since `/dev/sdX` ordering is not stable across reboots/hotplug;
 the operational path used for writes remains `/dev/<name>`.
 
+The default listing hides transport-removable volumes larger than
+`LARGE_TARGET_THRESHOLD_BYTES` (**64 GB**, decimal) — a display heuristic to keep
+external backup disks out of the obvious-target list. When the CLI hides any, it
+says so and points to `--all`.
+
 ## Known pitfalls
 
-- **`removable` bit lies both ways** — see above; never the sole gate.
+- **`removable` bit is unreliable** — many USB sticks/SSDs report `0`. Never a
+  gate; eligibility is transport-based (`bus ∈ {Usb, Mmc}`).
+- **Exotic external transports.** Thunderbolt / FireWire (and some eSATA) enclose
+  drives that surface as `Sata`/`Scsi`/`Unknown`, so a genuinely removable disk
+  on such a bus is **not** recognized as a target in Phase 1 — and `--all` will
+  not reveal it either, since that only unhides large *transport-removable*
+  volumes. Known limitation; reopen with an explicit signal (e.g. udev `ID_BUS`)
+  if a user needs it.
 - **Root on LUKS/LVM/RAID.** On this project's own dev host, `/` is
   `/dev/mapper/luks-…` → `dm-0` → slave `nvme0n1p2` → disk `nvme0n1`. Naïve
   "strip trailing digits" partition→disk mapping would miss the physical disk
