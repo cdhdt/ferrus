@@ -140,8 +140,9 @@ cargo fmt --check
 
 ## Roadmap
 
-- **Phase 0** (done — this session): scaffolding + architecture + safety guards.
-- **Phase 1**: device enumeration + safe selection (Linux).
+- **Phase 0** (done): scaffolding + architecture + safety guards.
+- **Phase 1** (done): device enumeration + safe selection (Linux). See
+  `docs/specs/device.md` (SPEC-0001).
 - **Phase 2**: generic ISO writing (the easy case).
 - **Phase 3**: Windows install media (NTFS + UEFI:NTFS + copy).
 - **Phase 4**: the differentiator — `autounattend.xml` + LabConfig generation.
