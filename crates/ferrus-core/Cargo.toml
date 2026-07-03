@@ -12,6 +12,10 @@ description = "Core engine for Ferrus: platform-abstracted bootable USB creation
 base64 = "0.22.1"
 sha2 = "0.11.0"
 thiserror.workspace = true
+# Read-only UDF parser for the unprivileged, no-mount Windows-media *hint*
+# (source::inspect_iso_kind). MIT-licensed (GPL-compatible). See ADR-0006: it
+# backs a non-authoritative hint only, never a destructive decision.
+hadris-udf = "1.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2.186"
