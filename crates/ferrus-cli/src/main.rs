@@ -18,7 +18,7 @@ use ferrus_core::device::{
 use ferrus_core::partition::prepare_windows;
 use ferrus_core::progress::{ProgressSink, Stage};
 use ferrus_core::source::RawImage;
-use ferrus_core::windows::{LocalAccountSpec, WindowsTweaks};
+use ferrus_core::windows::{LocalAccountSpec, RegionSpec, WindowsTweaks};
 
 /// Cross-platform bootable USB creator.
 #[derive(Debug, Parser)]
@@ -68,6 +68,22 @@ struct PrepareArgs {
     /// obfuscated, inside autounattend.xml.
     #[arg(long, value_name = "PASS")]
     local_password: Option<String>,
+
+    /// Reduce Windows diagnostic data to the edition minimum and disable
+    /// advertising ID / location / Find My Device / feedback. NOTE: on Home/Pro
+    /// telemetry floors at Required (Basic), not fully off. Requires --image.
+    #[arg(long)]
+    minimize_telemetry: bool,
+
+    /// Prevent automatic BitLocker device encryption during setup. Requires
+    /// --image.
+    #[arg(long)]
+    disable_auto_bitlocker: bool,
+
+    /// Preset the regional settings from a BCP-47 tag (e.g. fr-FR): UI language,
+    /// system/user locale and default keyboard. Requires --image.
+    #[arg(long, value_name = "TAG")]
+    region: Option<String>,
 
     /// Describe the plan without touching any device.
     #[arg(long)]
@@ -130,9 +146,14 @@ fn cmd_prepare_windows(args: &PrepareArgs) -> Result<()> {
             name: name.clone(),
             password: args.local_password.clone(),
         }),
+        minimize_telemetry: args.minimize_telemetry,
+        disable_auto_bitlocker: args.disable_auto_bitlocker,
+        region: args.region.as_ref().map(|locale| RegionSpec {
+            locale: locale.clone(),
+        }),
     };
     if tweaks.any() && image.is_none() {
-        bail!("Windows tweaks (--bypass-hardware / --local-account) require --image");
+        bail!("Windows tweaks require --image (they are written into autounattend.xml)");
     }
     let tweaks_opt = if tweaks.any() { Some(&tweaks) } else { None };
 
@@ -187,6 +208,15 @@ fn cmd_prepare_windows(args: &PrepareArgs) -> Result<()> {
                     ""
                 },
             ));
+        }
+        if tweaks.minimize_telemetry {
+            parts.push("minimize telemetry".to_owned());
+        }
+        if tweaks.disable_auto_bitlocker {
+            parts.push("disable auto-BitLocker".to_owned());
+        }
+        if let Some(region) = &tweaks.region {
+            parts.push(format!("region {}", region.locale));
         }
         println!("  tweaks : {}", parts.join(", "));
     } else {

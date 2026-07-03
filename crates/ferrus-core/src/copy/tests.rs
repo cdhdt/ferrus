@@ -640,7 +640,7 @@ fn windows_copy_deposits_autounattend_when_tweaks_present() {
     let mut progress = RecordingProgress::default();
     let tweaks = WindowsTweaks {
         bypass_hardware: true,
-        local_account: None,
+        ..WindowsTweaks::default()
     };
 
     copy_windows_with(
