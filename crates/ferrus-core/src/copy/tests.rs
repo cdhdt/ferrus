@@ -6,16 +6,19 @@
 //! by tempfiles.
 
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use super::stream::copy_stream;
+use super::stream::{BLOCK_SIZE, copy_stream};
+use super::tree::{TreeEntry, TreeIo, copy_tree, scan};
+use super::windows::copy_windows_with;
 use super::{ensure_fits, raw_copy_with};
 use crate::device::{Bus, Device, SafeTarget};
-use crate::platform::{WriteBackend, WriteSink};
+use crate::platform::{Mount, MountBackend, WriteBackend, WriteSink};
 use crate::progress::{ProgressSink, Stage};
-use crate::source::RawImage;
+use crate::source::{RawImage, detect_windows_install};
 use crate::{Error, Result};
 
 // --- test doubles ---------------------------------------------------------
@@ -287,4 +290,404 @@ fn verify_detects_corrupted_readback() {
 
     let err = raw_copy_with(&image, &target, true, &mut progress, &backend).unwrap_err();
     assert!(matches!(err, Error::VerifyMismatch { offset: 0 }));
+}
+
+// =========================================================================
+// Phase 3b — Windows ISO detection, recursive copy, and orchestration.
+// =========================================================================
+
+// --- Windows detection (pure) --------------------------------------------
+
+fn windows_marker_map() -> BTreeMap<String, u64> {
+    let mut m = BTreeMap::new();
+    m.insert("sources/install.wim".to_owned(), 5_000_000_000); // > 4 GB
+    m.insert("bootmgr".to_owned(), 1024);
+    m.insert("efi/boot/bootx64.efi".to_owned(), 2048);
+    m
+}
+
+#[test]
+fn detects_windows_iso_with_wim() {
+    let install = detect_windows_install(&windows_marker_map()).unwrap();
+    assert_eq!(install.install_image, "sources/install.wim");
+    assert_eq!(install.install_image_bytes, 5_000_000_000);
+}
+
+#[test]
+fn detects_windows_iso_with_esd() {
+    let mut m = windows_marker_map();
+    m.remove("sources/install.wim");
+    m.insert("sources/install.esd".to_owned(), 4_500_000_000);
+    let install = detect_windows_install(&m).unwrap();
+    assert_eq!(install.install_image, "sources/install.esd");
+}
+
+#[test]
+fn non_windows_tree_is_rejected() {
+    // Missing bootmgr.
+    let mut m = windows_marker_map();
+    m.remove("bootmgr");
+    assert!(detect_windows_install(&m).is_none());
+    // Missing any install image.
+    let mut m = windows_marker_map();
+    m.remove("sources/install.wim");
+    assert!(detect_windows_install(&m).is_none());
+    // A generic ISO.
+    let mut m = BTreeMap::new();
+    m.insert("readme.txt".to_owned(), 10);
+    assert!(detect_windows_install(&m).is_none());
+}
+
+// --- in-memory TreeIo -----------------------------------------------------
+
+#[derive(Default)]
+struct FakeTreeIo {
+    /// dir path -> [(name, is_dir, size)]
+    dirs: BTreeMap<PathBuf, Vec<(String, bool, u64)>>,
+    /// file path -> contents (source side)
+    contents: BTreeMap<PathBuf, Vec<u8>>,
+    /// captured writes (dest side)
+    written: RefCell<BTreeMap<PathBuf, Rc<RefCell<Vec<u8>>>>>,
+    /// created directories (dest side)
+    created: RefCell<Vec<PathBuf>>,
+    /// force a read failure at this path
+    fail_read: Option<PathBuf>,
+}
+
+struct VecWriter {
+    buf: Rc<RefCell<Vec<u8>>>,
+}
+
+impl Write for VecWriter {
+    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+        self.buf.borrow_mut().extend_from_slice(b);
+        Ok(b.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl TreeIo for FakeTreeIo {
+    fn read_dir(&self, dir: &Path) -> Result<Vec<TreeEntry>> {
+        Ok(self
+            .dirs
+            .get(dir)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(name, is_dir, size)| TreeEntry {
+                path: dir.join(name),
+                is_dir,
+                size,
+            })
+            .collect())
+    }
+    fn open_read(&self, file: &Path) -> Result<Box<dyn Read>> {
+        if self.fail_read.as_deref() == Some(file) {
+            return Err(std::io::Error::other("forced read failure").into());
+        }
+        Ok(Box::new(Cursor::new(
+            self.contents.get(file).cloned().unwrap_or_default(),
+        )))
+    }
+    fn create_dir(&self, dir: &Path) -> Result<()> {
+        self.created.borrow_mut().push(dir.to_path_buf());
+        Ok(())
+    }
+    fn open_write(&self, file: &Path) -> Result<Box<dyn Write>> {
+        let buf = Rc::new(RefCell::new(Vec::new()));
+        self.written
+            .borrow_mut()
+            .insert(file.to_path_buf(), buf.clone());
+        Ok(Box::new(VecWriter { buf }))
+    }
+    fn file_size(&self, file: &Path) -> Result<u64> {
+        if let Some(b) = self.written.borrow().get(file) {
+            return Ok(b.borrow().len() as u64);
+        }
+        if let Some(c) = self.contents.get(file) {
+            return Ok(c.len() as u64);
+        }
+        Err(std::io::Error::from(std::io::ErrorKind::NotFound).into())
+    }
+}
+
+impl FakeTreeIo {
+    fn dest_bytes(&self, path: &str) -> Option<Vec<u8>> {
+        self.written
+            .borrow()
+            .get(Path::new(path))
+            .map(|b| b.borrow().clone())
+    }
+}
+
+/// A minimal Windows ISO tree under `root`, with `install.wim` of `wim_size`
+/// bytes (contents match the declared size).
+fn windows_tree(root: &str, wim_size: usize) -> FakeTreeIo {
+    let root = PathBuf::from(root);
+    let mut dirs = BTreeMap::new();
+    dirs.insert(
+        root.clone(),
+        vec![
+            ("sources".to_owned(), true, 0),
+            ("bootmgr".to_owned(), false, 4),
+            ("efi".to_owned(), true, 0),
+        ],
+    );
+    dirs.insert(
+        root.join("sources"),
+        vec![("install.wim".to_owned(), false, wim_size as u64)],
+    );
+    dirs.insert(root.join("efi"), vec![("boot".to_owned(), true, 0)]);
+    dirs.insert(
+        root.join("efi").join("boot"),
+        vec![("bootx64.efi".to_owned(), false, 6)],
+    );
+    let mut contents = BTreeMap::new();
+    contents.insert(root.join("bootmgr"), vec![1u8; 4]);
+    contents.insert(root.join("sources").join("install.wim"), vec![7u8; wim_size]);
+    contents.insert(
+        root.join("efi").join("boot").join("bootx64.efi"),
+        vec![9u8; 6],
+    );
+    FakeTreeIo {
+        dirs,
+        contents,
+        ..Default::default()
+    }
+}
+
+// --- recursive copy -------------------------------------------------------
+
+#[test]
+fn copy_tree_preserves_structure_case_and_streams_large_files() {
+    // A tree with mixed-case names and a file larger than one block.
+    let big = BLOCK_SIZE + 100;
+    let mut io = FakeTreeIo::default();
+    io.dirs.insert(
+        PathBuf::from("/src"),
+        vec![
+            ("Dir".to_owned(), true, 0),
+            ("File.TXT".to_owned(), false, 3),
+        ],
+    );
+    io.dirs.insert(
+        PathBuf::from("/src/Dir"),
+        vec![("deep.bin".to_owned(), false, big as u64)],
+    );
+    io.contents
+        .insert(PathBuf::from("/src/File.TXT"), vec![1u8, 2, 3]);
+    io.contents
+        .insert(PathBuf::from("/src/Dir/deep.bin"), vec![7u8; big]);
+
+    let total = 3 + big as u64;
+    let mut progress = RecordingProgress::default();
+    let copied = copy_tree(&io, Path::new("/src"), Path::new("/dst"), total, &mut progress).unwrap();
+
+    assert_eq!(copied, total);
+    // Case and structure preserved verbatim.
+    assert_eq!(io.dest_bytes("/dst/File.TXT"), Some(vec![1u8, 2, 3]));
+    assert_eq!(io.dest_bytes("/dst/Dir/deep.bin"), Some(vec![7u8; big]));
+    assert!(io.created.borrow().contains(&PathBuf::from("/dst/Dir")));
+    // Progress reached the full total.
+    assert_eq!(progress.last, Some((total, Some(total))));
+}
+
+#[test]
+fn scan_totals_and_detects_windows() {
+    let io = windows_tree("/iso", 100);
+    let s = scan(&io, Path::new("/iso")).unwrap();
+    assert_eq!(s.total_bytes, 100 + 4 + 6);
+    assert!(detect_windows_install(&s.files).is_some());
+}
+
+// --- orchestration --------------------------------------------------------
+
+struct RecordingMount {
+    path: PathBuf,
+    tag: &'static str,
+    log: Rc<RefCell<Vec<String>>>,
+}
+
+impl Mount for RecordingMount {
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for RecordingMount {
+    fn drop(&mut self) {
+        self.log.borrow_mut().push(format!("umount:{}", self.tag));
+    }
+}
+
+struct FakeMountBackend {
+    log: Rc<RefCell<Vec<String>>>,
+}
+
+impl FakeMountBackend {
+    fn new() -> Self {
+        Self {
+            log: Rc::new(RefCell::new(Vec::new())),
+        }
+    }
+}
+
+impl MountBackend for FakeMountBackend {
+    fn mount_iso_ro(&self, _image: &Path) -> Result<Box<dyn Mount>> {
+        self.log.borrow_mut().push("mount_iso".to_owned());
+        Ok(Box::new(RecordingMount {
+            path: PathBuf::from("/iso"),
+            tag: "iso",
+            log: self.log.clone(),
+        }))
+    }
+    fn mount_ntfs_rw(&self, _partition: &Path) -> Result<Box<dyn Mount>> {
+        self.log.borrow_mut().push("mount_ntfs".to_owned());
+        Ok(Box::new(RecordingMount {
+            path: PathBuf::from("/ntfs"),
+            tag: "ntfs",
+            log: self.log.clone(),
+        }))
+    }
+    fn sync_path(&self, _path: &Path) -> Result<()> {
+        self.log.borrow_mut().push("sync".to_owned());
+        Ok(())
+    }
+}
+
+#[test]
+fn windows_copy_dry_run_mounts_nothing() {
+    let (_f, image) = image_of(&[0u8; 16]);
+    let io = windows_tree("/iso", 10);
+    let mounts = FakeMountBackend::new();
+    let mut progress = RecordingProgress::default();
+
+    copy_windows_with(
+        &image,
+        Path::new("/dev/sda1"),
+        1_000_000,
+        true,
+        false,
+        &mut progress,
+        &mounts,
+        &io,
+    )
+    .unwrap();
+
+    assert!(mounts.log.borrow().is_empty());
+}
+
+#[test]
+fn windows_copy_happy_path_order_and_content() {
+    let (_f, image) = image_of(&[0u8; 16]);
+    let io = windows_tree("/iso", 10);
+    let mounts = FakeMountBackend::new();
+    let mut progress = RecordingProgress::default();
+
+    copy_windows_with(
+        &image,
+        Path::new("/dev/sda1"),
+        1_000_000,
+        false,
+        true, // verify
+        &mut progress,
+        &mounts,
+        &io,
+    )
+    .unwrap();
+
+    // Mounts, sync, then RAII unmount of ntfs (declared last) before iso.
+    assert_eq!(
+        *mounts.log.borrow(),
+        vec!["mount_iso", "mount_ntfs", "sync", "umount:ntfs", "umount:iso"]
+    );
+    // Files landed on the NTFS mount, case preserved.
+    assert_eq!(io.dest_bytes("/ntfs/sources/install.wim"), Some(vec![7u8; 10]));
+    assert!(io.dest_bytes("/ntfs/efi/boot/bootx64.efi").is_some());
+}
+
+#[test]
+fn windows_copy_rejects_non_windows_before_ntfs_mount() {
+    let (_f, image) = image_of(&[0u8; 16]);
+    let mut io = FakeTreeIo::default();
+    io.dirs.insert(
+        PathBuf::from("/iso"),
+        vec![("readme.txt".to_owned(), false, 5)],
+    );
+    io.contents.insert(PathBuf::from("/iso/readme.txt"), vec![0u8; 5]);
+    let mounts = FakeMountBackend::new();
+    let mut progress = RecordingProgress::default();
+
+    let err = copy_windows_with(
+        &image,
+        Path::new("/dev/sda1"),
+        1_000_000,
+        false,
+        false,
+        &mut progress,
+        &mounts,
+        &io,
+    )
+    .unwrap_err();
+    assert!(matches!(err, Error::NotWindowsMedia { .. }));
+
+    let log = mounts.log.borrow();
+    assert!(log.contains(&"mount_iso".to_owned()));
+    assert!(log.contains(&"umount:iso".to_owned()));
+    assert!(!log.contains(&"mount_ntfs".to_owned()));
+}
+
+#[test]
+fn windows_copy_space_guard_before_ntfs_mount() {
+    let (_f, image) = image_of(&[0u8; 16]);
+    let io = windows_tree("/iso", 1000);
+    let mounts = FakeMountBackend::new();
+    let mut progress = RecordingProgress::default();
+
+    let err = copy_windows_with(
+        &image,
+        Path::new("/dev/sda1"),
+        100, // capacity smaller than the content
+        false,
+        false,
+        &mut progress,
+        &mounts,
+        &io,
+    )
+    .unwrap_err();
+    assert!(matches!(err, Error::InsufficientSpace { .. }));
+
+    let log = mounts.log.borrow();
+    assert!(log.contains(&"umount:iso".to_owned()));
+    assert!(!log.contains(&"mount_ntfs".to_owned()));
+}
+
+#[test]
+fn windows_copy_unmounts_both_on_copy_failure() {
+    let (_f, image) = image_of(&[0u8; 16]);
+    let mut io = windows_tree("/iso", 10);
+    io.fail_read = Some(PathBuf::from("/iso/sources/install.wim"));
+    let mounts = FakeMountBackend::new();
+    let mut progress = RecordingProgress::default();
+
+    let err = copy_windows_with(
+        &image,
+        Path::new("/dev/sda1"),
+        1_000_000,
+        false,
+        false,
+        &mut progress,
+        &mounts,
+        &io,
+    )
+    .unwrap_err();
+    assert!(matches!(err, Error::Io(_)));
+
+    // Both mounts torn down despite the mid-copy failure; sync never reached.
+    let log = mounts.log.borrow();
+    assert!(log.contains(&"umount:iso".to_owned()));
+    assert!(log.contains(&"umount:ntfs".to_owned()));
+    assert!(!log.contains(&"sync".to_owned()));
 }

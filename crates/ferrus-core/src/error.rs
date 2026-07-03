@@ -103,6 +103,29 @@ pub enum Error {
         expected: usize,
     },
 
+    /// The image is not a Windows installation ISO (expected markers absent).
+    #[error(
+        "{path} is not a Windows install ISO (missing sources/install.wim|esd, \
+         bootmgr or efi/boot/bootx64.efi) — use `ferrus write` for a generic ISO"
+    )]
+    NotWindowsMedia {
+        /// Path to the rejected image.
+        path: PathBuf,
+    },
+
+    /// The source content does not fit on the destination partition.
+    #[error("not enough space: need {needed} B but the partition holds {available} B")]
+    InsufficientSpace {
+        /// Bytes of content to copy.
+        needed: u64,
+        /// Capacity of the destination partition in bytes.
+        available: u64,
+    },
+
+    /// Post-copy verification failed.
+    #[error("verification failed: {0}")]
+    VerificationFailed(String),
+
     /// The operation, or the current platform target, is not implemented yet.
     #[error("not implemented: {0}")]
     Unsupported(String),

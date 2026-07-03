@@ -8,6 +8,7 @@
 //! This module holds the I/O and orchestration; the parsing logic lives in
 //! [`sysfs`] (pure) and [`mounts`] (resolution behind a testable trait).
 
+mod mount;
 mod mounts;
 mod partition;
 mod sysfs;

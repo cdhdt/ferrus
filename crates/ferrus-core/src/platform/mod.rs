@@ -232,3 +232,56 @@ pub fn partition_backend() -> Result<Box<dyn PartitionBackend>> {
         ))
     }
 }
+
+/// A temporary mount, unmounted (and its mountpoint removed) when dropped.
+///
+/// The `Drop` implementation is the reliability guarantee of SPEC-0004: both
+/// mounts are torn down even if the copy fails mid-way.
+pub trait Mount {
+    /// The directory the filesystem is mounted at.
+    fn path(&self) -> &Path;
+}
+
+/// Host-specific mounting for the Windows file-copy path (SPEC-0004), behind a
+/// trait so the orchestration is testable with a fake.
+pub trait MountBackend {
+    /// Mount the ISO at `image` read-only (loop; kernel autodetects
+    /// iso9660/UDF), returning a RAII guard.
+    ///
+    /// # Errors
+    /// Returns an error if the mount fails.
+    fn mount_iso_ro(&self, image: &Path) -> Result<Box<dyn Mount>>;
+
+    /// Mount the NTFS `partition` read-write (ntfs3, then ntfs-3g), returning a
+    /// RAII guard.
+    ///
+    /// # Errors
+    /// Returns [`Error::MissingTool`](crate::Error::MissingTool) if no NTFS
+    /// driver can mount it, or another error on failure.
+    fn mount_ntfs_rw(&self, partition: &Path) -> Result<Box<dyn Mount>>;
+
+    /// Flush the filesystem mounted at `path` durably to disk.
+    ///
+    /// # Errors
+    /// Returns an error if the sync fails.
+    fn sync_path(&self, path: &Path) -> Result<()>;
+}
+
+/// Returns the [`MountBackend`] for the current compilation target.
+///
+/// # Errors
+///
+/// Returns [`Error::Unsupported`](crate::Error::Unsupported) when compiled for
+/// an OS that does not yet have a mount backend.
+pub fn mount_backend() -> Result<Box<dyn MountBackend>> {
+    #[cfg(target_os = "linux")]
+    {
+        Ok(Box::new(linux::LinuxBackend::new()))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err(crate::Error::Unsupported(
+            "no mount backend for this OS yet".to_owned(),
+        ))
+    }
+}

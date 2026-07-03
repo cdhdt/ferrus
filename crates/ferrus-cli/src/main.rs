@@ -45,7 +45,16 @@ struct PrepareArgs {
     #[arg(long, value_name = "DEV")]
     target: std::path::PathBuf,
 
-    /// Describe the partition plan without touching any device.
+    /// Windows install ISO to copy onto the NTFS partition (Phase 3b). Omit to
+    /// only partition + format (3a).
+    #[arg(long, value_name = "FILE")]
+    image: Option<std::path::PathBuf>,
+
+    /// After copying, verify the install image size on the stick (Phase 3b).
+    #[arg(long)]
+    verify: bool,
+
+    /// Describe the plan without touching any device.
     #[arg(long)]
     dry_run: bool,
 }
@@ -140,6 +149,14 @@ fn main() -> Result<()> {
 }
 
 fn cmd_prepare_windows(args: &PrepareArgs) -> Result<()> {
+    // Validate the ISO up front, if one was given.
+    let image = match &args.image {
+        Some(path) => Some(
+            RawImage::open(path).with_context(|| format!("cannot use image {}", path.display()))?,
+        ),
+        None => None,
+    };
+
     let device = list_all_devices()
         .context("failed to enumerate devices")?
         .into_iter()
@@ -159,13 +176,23 @@ fn cmd_prepare_windows(args: &PrepareArgs) -> Result<()> {
         target.device().path.display(),
         format_size(target.device().size_bytes),
     );
+    match &image {
+        Some(img) => println!(
+            "  image  : {} ({})",
+            img.path().display(),
+            format_size(img.size_bytes())
+        ),
+        None => println!("  image  : none (partition + format only)"),
+    }
     println!(
-        "  mode   : {}",
+        "  mode   : {}{}",
         if target.is_dry_run() { "dry-run" } else { "REAL (destructive)" },
+        if args.verify { ", verify" } else { "" },
     );
 
     let mut progress = CliProgress::default();
-    prepare_windows(&target, &mut progress).context("prepare-windows failed")?;
+    prepare_windows(&target, image.as_ref(), args.verify, &mut progress)
+        .context("prepare-windows failed")?;
     Ok(())
 }
 

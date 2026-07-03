@@ -7,12 +7,16 @@
 //!
 //! Layout:
 //!
-//! - [`stream`] — the pure block-copy loop against a [`WriteSink`].
-//! - orchestration ([`raw_copy`]) — the destructive sequence: size guard,
-//!   dry-run short-circuit, EUID gate, defense-in-depth re-check, unmount,
-//!   exclusive open, copy, and the mandatory final `fsync`.
+//! - [`stream`] — the pure block-copy loops.
+//! - [`raw_copy`] — the Phase 2 raw (dd-style) whole-device write.
+//! - [`tree`] — recursive scan/copy over a testable `TreeIo` seam.
+//! - [`copy_windows`] — the Phase 3b Windows ISO → NTFS file copy.
 
 mod stream;
+mod tree;
+mod windows;
+
+pub use windows::copy_windows;
 
 use std::io::Read;
 use std::path::Path;

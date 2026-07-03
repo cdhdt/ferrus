@@ -74,6 +74,46 @@ impl RawImage {
     }
 }
 
+/// The install image found in a recognized Windows ISO tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowsInstall {
+    /// Relative path (lowercase, `/`-separated) of `install.wim` or
+    /// `install.esd` within the ISO.
+    pub install_image: String,
+    /// Size of that install image in bytes.
+    pub install_image_bytes: u64,
+}
+
+/// Decide whether a mounted image is a Windows install ISO, from the set of its
+/// relative file paths (lowercased, `/`-separated) mapped to their sizes.
+///
+/// Recognition is by **real markers**, never by file name/extension:
+/// `sources/install.wim` or `sources/install.esd`, plus `bootmgr` and
+/// `efi/boot/bootx64.efi` (matched case-insensitively — callers lowercase the
+/// keys). Returns the install image when recognized, `None` otherwise.
+///
+/// Pure and unit tested.
+#[must_use]
+pub fn detect_windows_install(
+    files: &std::collections::BTreeMap<String, u64>,
+) -> Option<WindowsInstall> {
+    let install = if files.contains_key("sources/install.wim") {
+        "sources/install.wim"
+    } else if files.contains_key("sources/install.esd") {
+        "sources/install.esd"
+    } else {
+        return None;
+    };
+    if files.contains_key("bootmgr") && files.contains_key("efi/boot/bootx64.efi") {
+        Some(WindowsInstall {
+            install_image: install.to_owned(),
+            install_image_bytes: files[install],
+        })
+    } else {
+        None
+    }
+}
+
 /// What kind of source image Ferrus is dealing with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]

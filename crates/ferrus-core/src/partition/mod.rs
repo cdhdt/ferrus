@@ -19,9 +19,12 @@ pub use plan::{
     compute_windows_layout, partition_path,
 };
 
+use std::path::PathBuf;
+
 use crate::device::{SafeTarget, format_size};
 use crate::platform::PartitionBackend;
 use crate::progress::{ProgressSink, Stage};
+use crate::source::RawImage;
 use crate::{Error, Result};
 
 /// Partition-table style.
@@ -54,20 +57,47 @@ pub enum FsKind {
 /// External tools the Windows-prepare path needs, checked before any write.
 const REQUIRED_TOOLS: [&str; 4] = ["sfdisk", "mkfs.ntfs", "mkfs.vfat", "partprobe"];
 
-/// Partition and format `target` as the skeleton of a Windows install stick.
+/// Partition and format `target` as the skeleton of a Windows install stick,
+/// and — when `image` is given — copy the Windows ISO contents onto it (3b).
 ///
 /// Takes a [`SafeTarget`], so it cannot be reached without the SPEC-0001
 /// checkpoint. Honors [`SafeTarget::is_dry_run`]: in dry-run it only reports the
-/// intended layout.
+/// intended layout and copy plan. `verify` enables the light post-copy check.
 ///
 /// # Errors
 ///
-/// Returns [`Error::DeviceTooSmall`], [`Error::PrivilegeRequired`],
-/// [`Error::MissingTool`], [`Error::UnsafeTarget`],
-/// [`Error::PartitionNodesMissing`], [`Error::Tool`], or [`Error::Io`].
-pub fn prepare_windows(target: &SafeTarget, progress: &mut dyn ProgressSink) -> Result<()> {
+/// Returns the partitioning errors ([`Error::DeviceTooSmall`],
+/// [`Error::PrivilegeRequired`], [`Error::MissingTool`], [`Error::UnsafeTarget`],
+/// [`Error::PartitionNodesMissing`], [`Error::Tool`], [`Error::Io`]) and, when
+/// copying, the SPEC-0004 errors ([`Error::NotWindowsMedia`],
+/// [`Error::InsufficientSpace`], [`Error::VerificationFailed`]).
+pub fn prepare_windows(
+    target: &SafeTarget,
+    image: Option<&RawImage>,
+    verify: bool,
+    progress: &mut dyn ProgressSink,
+) -> Result<()> {
     let backend = crate::platform::partition_backend()?;
-    prepare_windows_with(target, progress, backend.as_ref())
+    let nodes = prepare_windows_with(target, progress, backend.as_ref())?;
+
+    if let Some(image) = image {
+        // P1 is the NTFS partition; in dry-run there are no real nodes, so fall
+        // back to its intended path.
+        let p1 = nodes
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| partition_path(&target.device().path, 1));
+        let layout = compute_windows_layout(target.device().size_bytes)?;
+        crate::copy::copy_windows(
+            image,
+            &p1,
+            layout.windows.size_bytes,
+            target.is_dry_run(),
+            verify,
+            progress,
+        )?;
+    }
+    Ok(())
 }
 
 /// The orchestration with the backend injected, for testing. See SPEC-0003 for
@@ -76,7 +106,7 @@ fn prepare_windows_with(
     target: &SafeTarget,
     progress: &mut dyn ProgressSink,
     backend: &dyn PartitionBackend,
-) -> Result<()> {
+) -> Result<Vec<PathBuf>> {
     let device = target.device();
     let layout = compute_windows_layout(device.size_bytes)?;
 
@@ -94,7 +124,7 @@ fn prepare_windows_with(
 
     if target.is_dry_run() {
         progress.message("dry-run: no table written, nothing formatted");
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     // Fail fast, before any destructive step.
@@ -137,11 +167,8 @@ fn prepare_windows_with(
     progress.message(&format!("formatting {} as FAT", p2.display()));
     backend.make_filesystem(p2, layout.helper.fs, layout.helper.name)?;
 
-    progress.message(
-        "done: partitioned and formatted. NOT bootable yet — files (3b) and \
-         UEFI:NTFS bootloader (3c) come next.",
-    );
-    Ok(())
+    progress.message("partitioned and formatted");
+    Ok(nodes)
 }
 
 /// Short label for a filesystem kind (for progress messages).
