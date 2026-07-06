@@ -53,10 +53,9 @@ Rendered with the CPU backend (`ICED_BACKEND=tiny-skia`).
 *Pick a device and an ISO, tick the tweaks. The **Write** button is danger-styled
 and stays disabled until you type the exact device path (type-to-confirm).*
 
-![A real write in progress, with a live progress bar](docs/screenshots/write.png)
+![The GUI during a write, showing a live progress bar](docs/screenshots/write.png)
 
-*A real write: the progress bar and the streamed log advance while the window
-stays responsive.*
+*The GUI during a write: the live progress bar and the streamed log.*
 
 ![A dry-run plan — nothing is written](docs/screenshots/dry-run.png)
 
@@ -150,15 +149,22 @@ Ferrus is validated on **real hardware, through Windows 11 25H2**:
 - on a real 25H2 install: **no TPM wall** (hardware bypass), **local account
   created without a Microsoft account**, and — in a TPM 2.0 + Secure Boot VM — **no
   automatic BitLocker**;
-- the **GUI's destructive path** end to end: after `sudo make install`, clicking
-  *Write* raised the **named** polkit action (the "…ERASES ALL DATA…" dialog, not
-  the generic one), and the real write streamed a **live progress bar** without
-  freezing the window.
+- the **GUI's write path**, end to end: the destructive path the *Write* button
+  invokes — unprivileged GUI → type-to-confirm → the **named** polkit action → the
+  root helper re-validating the target → live NDJSON progress — was exercised via
+  the helper's `write` verb (byte-identical to what the button spawns). A real
+  8.5 GB write of a Windows 11 25H2 ISO completed and streamed live progress, and
+  the produced stick booted Windows Setup. The type-to-confirm gate is covered by
+  unit tests.
 
 The engine ships with unit tests (including the refusal cases) and CI runs
 `fmt` + `clippy -D warnings` + tests on every push.
 
 **Not done / limits:**
+
+- The fully on-screen click-through has not been recorded yet: clicking *Write* in
+  the window, seeing the named polkit dialog and the animated bar live. (The write
+  path it drives is proven above; only the in-window capture is pending.)
 
 - **Linux only.** Windows and macOS are on the roadmap; the code is
   platform-abstracted (traits + `cfg`) but only the Linux backend is implemented.
