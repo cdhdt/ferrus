@@ -139,6 +139,91 @@ fn format_guid_fields(d1: u32, d2: u16, d3: u16, d4: [u8; 8]) -> String {
     )
 }
 
+/// Whether a `GET_DRIVE_LAYOUT_EX` buffer of `buf_len` bytes holds **all** `count`
+/// partition entries (entries start at `entries_off`, each `entry_size` bytes).
+///
+/// The ESP guard must fail **closed**: a partial read is an error, never a short
+/// list that might silently miss a system partition. Returns `false` on any
+/// shortfall or arithmetic overflow.
+#[allow(dead_code)] // used by `disk_write` (Windows) and the tests
+fn layout_buffer_holds_all(
+    buf_len: usize,
+    entries_off: usize,
+    entry_size: usize,
+    count: usize,
+) -> bool {
+    match count
+        .checked_mul(entry_size)
+        .and_then(|n| n.checked_add(entries_off))
+    {
+        Some(needed) => needed <= buf_len,
+        None => false,
+    }
+}
+
+/// Whether a raw OS error means "no media present" — a *legitimate* reason a
+/// volume has no disk extents — as opposed to a real read failure we must not
+/// swallow. `ERROR_NOT_READY` (21) / `ERROR_NO_MEDIA_IN_DRIVE` (1112), winerror.h.
+#[allow(dead_code)] // used by `disk_write` (Windows) and the tests
+fn is_no_media_error(raw_os_error: Option<i32>) -> bool {
+    matches!(raw_os_error, Some(21) | Some(1112))
+}
+
+/// GPT on-disk geometry derived from the disk size and its logical sector size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GptGeometry {
+    /// First byte usable by a partition (after the protective MBR + primary GPT).
+    pub first_usable: u64,
+    /// One-past-the-last usable byte (before the backup GPT at the disk end).
+    pub last_usable_end: u64,
+    /// Logical sector size in bytes.
+    pub bytes_per_sector: u64,
+}
+
+/// Compute the GPT usable range: 34 sectors reserved at the front (protective MBR,
+/// GPT header, and the 16 KiB entry array) and 33 at the back (entry array plus
+/// backup header), per the UEFI/GPT layout. Reserving 34/33 **sectors** (not a
+/// hardcoded 512) is correct on 512 B media and conservative on 4Kn (it
+/// over-reserves, which is safe).
+#[allow(dead_code)] // used by `disk_write` (Windows) and the tests
+fn gpt_geometry(disk_size: u64, bytes_per_sector: u64) -> GptGeometry {
+    let bps = bytes_per_sector.max(1);
+    GptGeometry {
+        first_usable: 34 * bps,
+        last_usable_end: disk_size.saturating_sub(33 * bps),
+        bytes_per_sector: bps,
+    }
+}
+
+/// Place a partition within the usable range, **aligned to the sector size**:
+/// start is floored to `first_usable` then rounded up; the end is clamped to
+/// `last_usable_end` then rounded down. Returns `(start, length)` in bytes; a
+/// length of 0 means it does not fit.
+#[allow(dead_code)] // used by `disk_write` (Windows) and the tests
+fn place_partition(start_bytes: u64, size_bytes: u64, geom: &GptGeometry) -> (u64, u64) {
+    let bps = geom.bytes_per_sector;
+    let start = round_up(start_bytes.max(geom.first_usable), bps);
+    let raw_end = start_bytes
+        .saturating_add(size_bytes)
+        .min(geom.last_usable_end);
+    let end = round_down(raw_end, bps);
+    (start, end.saturating_sub(start))
+}
+
+#[allow(dead_code)] // used by `place_partition`
+fn round_up(v: u64, align: u64) -> u64 {
+    if align == 0 {
+        v
+    } else {
+        v.div_ceil(align) * align
+    }
+}
+
+#[allow(dead_code)] // used by `place_partition`
+fn round_down(v: u64, align: u64) -> u64 {
+    if align == 0 { v } else { (v / align) * align }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,6 +315,71 @@ mod tests {
         assert!(parse_guid_fields("not-a-guid").is_none());
         assert!(parse_guid_fields("EBD0A0A2-B9E5-4433-87C0").is_none()); // too few groups
         assert!(parse_guid_fields("").is_none());
+    }
+
+    #[test]
+    fn esp_guard_read_fails_closed_when_truncated() {
+        // 100-byte header, 40-byte entries. A buffer holding 2 entries but a table
+        // claiming 3 → NOT all present → the caller must error, not read 2.
+        let (header, entry) = (100usize, 40usize);
+        assert!(layout_buffer_holds_all(
+            header + 2 * entry,
+            header,
+            entry,
+            2
+        ));
+        assert!(!layout_buffer_holds_all(
+            header + 2 * entry,
+            header,
+            entry,
+            3
+        ));
+        assert!(layout_buffer_holds_all(header, header, entry, 0));
+        // Overflow is treated as "does not hold" (fail closed).
+        assert!(!layout_buffer_holds_all(usize::MAX, 0, usize::MAX, 2));
+    }
+
+    #[test]
+    fn no_media_errors_are_recognized_others_propagate() {
+        assert!(is_no_media_error(Some(21))); // ERROR_NOT_READY
+        assert!(is_no_media_error(Some(1112))); // ERROR_NO_MEDIA_IN_DRIVE
+        assert!(!is_no_media_error(Some(5))); // ERROR_ACCESS_DENIED → propagate
+        assert!(!is_no_media_error(Some(1)));
+        assert!(!is_no_media_error(None));
+    }
+
+    #[test]
+    fn geometry_512_matches_the_legacy_constants() {
+        // 16 GB disk, 512-byte sectors: identical to the old hardcoded values
+        // (first usable 34*512 = 17408, backup reserve 33*512 = 16896).
+        let disk = 16 * 1000 * 1000 * 1000;
+        let g = gpt_geometry(disk, 512);
+        assert_eq!(g.first_usable, 17408);
+        assert_eq!(g.last_usable_end, disk - 16896);
+        // A 1 MiB-aligned P1 is unchanged and stays sector-aligned.
+        let mib = 1024 * 1024;
+        let (start, len) = place_partition(mib, disk - 2 * mib, &g);
+        assert_eq!(start, mib);
+        assert_eq!(start % 512, 0);
+        assert_eq!(len % 512, 0);
+    }
+
+    #[test]
+    fn geometry_4kn_reserves_and_aligns_on_4096() {
+        let disk = 16 * 1000 * 1000 * 1000;
+        let g = gpt_geometry(disk, 4096);
+        assert_eq!(g.first_usable, 34 * 4096);
+        assert_eq!(g.last_usable_end, disk - 33 * 4096);
+        // Everything is aligned to 4096.
+        let mib = 1024 * 1024;
+        let (start, len) = place_partition(mib, disk, &g);
+        assert_eq!(start % 4096, 0);
+        assert_eq!(len % 4096, 0);
+        assert!(start >= g.first_usable);
+        assert!(start + len <= g.last_usable_end);
+        // A start below first_usable is floored up to it (still 4096-aligned).
+        let (s2, _) = place_partition(0, mib, &g);
+        assert_eq!(s2, 34 * 4096);
     }
 }
 

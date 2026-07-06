@@ -10,6 +10,21 @@ unit tests only.
 
 ## [Unreleased]
 
+### Changed
+
+- **Hardened `ferrus-win32`'s write path (audit follow-up).** Three fixes;
+  behavior on normal 512-byte media is unchanged. (1) The ESP guard's layout read
+  now **fails closed** — a partition table that does not fit the read buffer is an
+  error, never a truncated list that could miss a system partition. (2) Volume
+  lock/dismount no longer swallows read errors: only a genuine "no media"
+  (`ERROR_NOT_READY` / `ERROR_NO_MEDIA_IN_DRIVE`) means "not on this disk"; any
+  other error propagates, so a mounted volume is never silently skipped (which
+  could corrupt it). (3) GPT geometry is derived from the disk's **real** logical
+  sector size (`IOCTL_DISK_GET_DRIVE_GEOMETRY_EX`), not a hardcoded 512, with
+  sector-aligned partitions and fail-closed if it cannot be read — correct on 4Kn
+  media. The three decisions are pure functions, unit-tested on any host (truncated
+  read → error; no-media classification; geometry for 512 B and 4096 B).
+
 ### Added
 
 - **Windows GPT partitioning + NTFS format (Phase 6.2a, SPEC-00010).** The first

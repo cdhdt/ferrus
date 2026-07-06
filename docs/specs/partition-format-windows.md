@@ -73,13 +73,30 @@ the code grows the buffer and retries on `ERROR_MORE_DATA` /
 `ERROR_INSUFFICIENT_BUFFER`. The write side builds a fixed **two-entry**
 `DRIVE_LAYOUT_INFORMATION_EX` via a `#[repr(C)]` wrapper.
 
-## Geometry caveat (validate on hardware)
+## Geometry (real sector size)
 
-The GPT usable range assumes a **512-byte** logical sector: first usable byte =
-`34 * 512`, backup GPT reserve = `33 * 512`, and the **last partition is clamped to
-the last usable LBA** (something `sfdisk` did for us on Linux). A 4Kn disk or an
-off-by-a-sector usable range would need adjustment — this is the part most in need
-of real-hardware validation.
+The GPT usable range is derived from the disk's **real** logical sector size,
+read via `IOCTL_DISK_GET_DRIVE_GEOMETRY_EX` (`DISK_GEOMETRY.BytesPerSector`); if it
+cannot be read, the write **fails closed** (never assumes 512). First usable = 34
+sectors, backup reserve = 33 sectors (the UEFI/GPT layout — 34/33 *sectors*, which
+is exact on 512 B and safely over-reserves on 4Kn). Partitions are aligned to the
+sector size and the last partition is clamped to the last usable LBA (something
+`sfdisk` did for us on Linux). The geometry (`(disk_size, bytes_per_sector) →
+first/last usable`, partition placement) is a **pure function**, unit-tested for
+512 B (identical to the previous behavior) and 4096 B (offsets aligned on 4096,
+first usable = 34×4096). Still worth a real-hardware pass on an actual 4Kn disk.
+
+## `write_gpt_layout` is an unguarded primitive
+
+`ferrus_win32::write_gpt_layout` is a low-level, **unguarded** destructive
+primitive: it locks/dismounts and rewrites the table with no safety checks of its
+own. It must only be called **behind `prepare_partition`**, which owns the guards
+(dry-run, Administrator, not-system, and the ESP guard). The ESP guard's layout
+read (`read_partition_type_guids`) is itself **fail-closed**: a partition table
+that does not fit the read buffer is an error, never a partial list that could miss
+a system partition. Likewise, the volume lock/dismount step only treats a genuine
+"no media" error (`ERROR_NOT_READY` / `ERROR_NO_MEDIA_IN_DRIVE`) as "not on this
+disk"; any other error propagates, so a mounted volume is never silently skipped.
 
 ## Elevation
 
