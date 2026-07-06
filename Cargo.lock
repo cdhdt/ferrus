@@ -972,6 +972,7 @@ name = "ferrus-core"
 version = "0.4.0"
 dependencies = [
  "base64",
+ "ferrus-win32",
  "hadris-iso",
  "hadris-udf",
  "libc",
@@ -999,6 +1000,13 @@ dependencies = [
  "ferrus-core",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "ferrus-win32"
+version = "0.4.0"
+dependencies = [
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
