@@ -134,6 +134,29 @@ pub fn backend() -> Result<Box<dyn Backend>> {
     }
 }
 
+/// The current process's effective UID (`0` == root).
+///
+/// Exposed for the privileged helper (SPEC-0008), which asserts it is actually
+/// elevated before doing anything. The destructive engine paths enforce root
+/// internally too; this is the same check, made available at the boundary.
+///
+/// # Errors
+///
+/// Returns [`Error::Unsupported`](crate::Error::Unsupported) on an OS without a
+/// backend, or an I/O error if the UID cannot be read.
+pub fn effective_uid() -> Result<u32> {
+    #[cfg(target_os = "linux")]
+    {
+        linux::effective_uid()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err(crate::Error::Unsupported(
+            "effective uid unavailable on this OS".to_owned(),
+        ))
+    }
+}
+
 /// Returns the [`WriteBackend`] for the current compilation target.
 ///
 /// # Errors

@@ -4,6 +4,7 @@ members = [
     "crates/ferrus-core",
     "crates/ferrus-cli",
     "crates/ferrus-gui",
+    "crates/ferrus-helper",
 ]
 
 [workspace.package]

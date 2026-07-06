@@ -102,6 +102,12 @@ fn current_system_disks() -> std::collections::BTreeSet<String> {
     build_system_disk_set(&mounts, &swaps, &RealBlockFs)
 }
 
+/// The current process's effective UID (`0` == root), from `/proc/self/status`.
+/// Reused by the privileged helper (SPEC-0008) to assert it is elevated.
+pub(super) fn effective_uid() -> crate::Result<u32> {
+    write::read_effective_uid()
+}
+
 /// Whether the whole disk at `device_path` currently backs the system or a
 /// critical mount. Shared by both the enumeration and write backends.
 pub(super) fn disk_is_system_or_critical(device_path: &Path) -> bool {

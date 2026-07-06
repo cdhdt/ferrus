@@ -1,0 +1,24 @@
+[package]
+name = "ferrus-helper"
+version = "0.4.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Minimal polkit-elevated privileged helper for Ferrus (SPEC-0008)."
+
+[lib]
+name = "ferrus_helper"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ferrus-helper"
+path = "src/main.rs"
+
+[dependencies]
+# The engine. The helper is a thin, re-validating shell over it — no new logic.
+ferrus-core = { workspace = true }
+# The GUI<->helper contract (JSON over stdin/stdout).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
