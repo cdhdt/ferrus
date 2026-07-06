@@ -90,6 +90,55 @@ fn read_ansi_at(buf: &[u8], offset: usize) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
+/// A GPT partition to create: byte offset, byte length, type GUID string, and its
+/// 1-based number. Plain data handed to [`write_gpt_layout`].
+#[derive(Debug, Clone)]
+pub struct GptPartitionSpec {
+    /// Starting byte offset on the disk.
+    pub start_bytes: u64,
+    /// Length in bytes.
+    pub size_bytes: u64,
+    /// GPT partition **type** GUID, canonical string form.
+    pub type_guid: String,
+    /// 1-based partition number.
+    pub partition_number: u32,
+}
+
+/// Parse a canonical GUID string into its `(Data1, Data2, Data3, Data4)` fields.
+/// Pure; used to build a Win32 `GUID` for the layout write.
+#[allow(dead_code)] // used by `disk_write` (Windows) and the tests
+fn parse_guid_fields(s: &str) -> Option<(u32, u16, u16, [u8; 8])> {
+    let s = s.trim().trim_start_matches('{').trim_end_matches('}');
+    let parts: Vec<&str> = s.split('-').collect();
+    if parts.len() != 5
+        || parts[0].len() != 8
+        || parts[1].len() != 4
+        || parts[2].len() != 4
+        || parts[3].len() != 4
+        || parts[4].len() != 12
+    {
+        return None;
+    }
+    let d1 = u32::from_str_radix(parts[0], 16).ok()?;
+    let d2 = u16::from_str_radix(parts[1], 16).ok()?;
+    let d3 = u16::from_str_radix(parts[2], 16).ok()?;
+    let tail = format!("{}{}", parts[3], parts[4]); // 16 hex chars → 8 bytes
+    let mut d4 = [0u8; 8];
+    for (i, byte) in d4.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&tail[i * 2..i * 2 + 2], 16).ok()?;
+    }
+    Some((d1, d2, d3, d4))
+}
+
+/// Format `(Data1, Data2, Data3, Data4)` as an uppercase canonical GUID string.
+#[allow(dead_code)] // used by `disk_write` (Windows) and the tests
+fn format_guid_fields(d1: u32, d2: u16, d3: u16, d4: [u8; 8]) -> String {
+    format!(
+        "{d1:08X}-{d2:04X}-{d3:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
+        d4[0], d4[1], d4[2], d4[3], d4[4], d4[5], d4[6], d4[7]
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,6 +200,37 @@ mod tests {
         spaced[2..6].copy_from_slice(b"AB  ");
         assert_eq!(read_ansi_at(&spaced, 2).as_deref(), Some("AB")); // trimmed
     }
+
+    #[test]
+    fn guid_parse_format_roundtrip() {
+        // Microsoft basic-data GUID (SPEC-0003).
+        let g = "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7";
+        let (d1, d2, d3, d4) = parse_guid_fields(g).unwrap();
+        assert_eq!(d1, 0xEBD0_A0A2);
+        assert_eq!(d2, 0xB9E5);
+        assert_eq!(d3, 0x4433);
+        assert_eq!(d4, [0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26, 0x99, 0xC7]);
+        assert_eq!(format_guid_fields(d1, d2, d3, d4), g);
+        // Lowercase and braces are accepted and normalized to uppercase.
+        assert_eq!(
+            format_guid_fields(
+                parse_guid_fields(&format!("{{{}}}", g.to_lowercase()))
+                    .unwrap()
+                    .0,
+                parse_guid_fields(g).unwrap().1,
+                parse_guid_fields(g).unwrap().2,
+                parse_guid_fields(g).unwrap().3,
+            ),
+            g
+        );
+    }
+
+    #[test]
+    fn guid_parse_rejects_malformed() {
+        assert!(parse_guid_fields("not-a-guid").is_none());
+        assert!(parse_guid_fields("EBD0A0A2-B9E5-4433-87C0").is_none()); // too few groups
+        assert!(parse_guid_fields("").is_none());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +250,11 @@ const _: () = {
 
 #[cfg(windows)]
 pub use imp::{enumerate_physical_disks, system_disk_numbers};
+
+#[cfg(windows)]
+mod disk_write;
+#[cfg(windows)]
+pub use disk_write::{is_process_elevated, read_partition_type_guids, write_gpt_layout};
 
 #[cfg(windows)]
 mod imp {
