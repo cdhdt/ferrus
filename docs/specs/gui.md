@@ -120,6 +120,12 @@ ISO-selection time, to drive the tweaks gating.
 - **`Unknown` is honest, not `Generic`.** Neither pass matched (not UDF-Windows,
   no readable ISO9660 content, or an I/O error) → `Unknown`. We never claim
   `Generic` for something we could not read, nor `Windows` without the markers.
+- **Panics are contained.** `hadris-udf`/`hadris-iso` parse untrusted binary and
+  are young; a panic on a malformed image must never reach the UI. The workspace
+  builds with `panic = unwind` (default), so `inspect_iso_kind` wraps the parsing
+  in `std::panic::catch_unwind` and degrades a panic to `Unknown`. (An owned path
+  keeps the closure `UnwindSafe`.) A parser bug can therefore, at worst, produce a
+  wrong or absent hint — never a crash and never a destructive decision.
 - **Hint vs authority.** `inspect_iso_kind` is only a UI hint. The judge is
   `detect_windows_install` on the **mounted** ISO at write time. They can diverge on
   an edge case (structure markers present but no `install.wim`) — acceptable: the

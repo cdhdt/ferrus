@@ -172,6 +172,21 @@ fn iso9660_root_looks_generic(names: &[String]) -> bool {
 /// `Generic` or a false `Windows`.
 #[must_use]
 pub fn inspect_iso_kind(path: &Path) -> MediaKind {
+    // The disk parsers (hadris-udf / hadris-iso) parse untrusted binary and are
+    // young. A panic on a malformed image must degrade to `Unknown`, never crash
+    // the caller (e.g. the GUI). The workspace builds with `panic = unwind`, so
+    // `catch_unwind` contains it (SPEC-0007). An owned path keeps the closure
+    // `UnwindSafe`.
+    let owned = path.to_path_buf();
+    guarded(move || inspect_iso_kind_inner(&owned))
+}
+
+/// Run a parser closure, converting any panic into [`MediaKind::Unknown`].
+fn guarded(parse: impl FnOnce() -> MediaKind + std::panic::UnwindSafe) -> MediaKind {
+    std::panic::catch_unwind(parse).unwrap_or(MediaKind::Unknown)
+}
+
+fn inspect_iso_kind_inner(path: &Path) -> MediaKind {
     // 1. UDF pass — Windows install media.
     if udf_root_names(path).is_some_and(|names| udf_root_is_windows(&names)) {
         return MediaKind::Windows;
@@ -215,7 +230,9 @@ fn iso9660_root_names(path: &Path) -> Option<Vec<String>> {
 mod tests {
     use std::io::Write;
 
-    use super::{MediaKind, inspect_iso_kind, iso9660_root_looks_generic, udf_root_is_windows};
+    use super::{
+        MediaKind, guarded, inspect_iso_kind, iso9660_root_looks_generic, udf_root_is_windows,
+    };
 
     fn names(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| (*s).to_owned()).collect()
@@ -294,10 +311,26 @@ mod tests {
             inspect_iso_kind(std::path::Path::new("/no/such/file.iso")),
             MediaKind::Unknown
         );
-        // A real file that is not a UDF image → Unknown, never a false Generic.
+        // A real file that is neither UDF nor a content-bearing ISO9660 tree →
+        // Unknown, never a false Generic.
         let mut f = tempfile::NamedTempFile::new().unwrap();
-        f.write_all(b"definitely not a UDF filesystem, just some bytes")
+        f.write_all(b"definitely not a disk image, just some bytes")
             .unwrap();
         assert_eq!(inspect_iso_kind(f.path()), MediaKind::Unknown);
+    }
+
+    // --- panic containment (SPEC-0007) ------------------------------------
+
+    #[test]
+    fn a_parser_panic_is_contained_as_unknown() {
+        // We could not reliably force hadris to panic from a fixture, so we test
+        // the containment mechanism directly: a panicking parse degrades to
+        // Unknown, and a normal result passes through. (cargo captures the
+        // expected panic's stderr.)
+        assert_eq!(
+            guarded(|| panic!("simulated parser panic")),
+            MediaKind::Unknown
+        );
+        assert_eq!(guarded(|| MediaKind::Windows), MediaKind::Windows);
     }
 }

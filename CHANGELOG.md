@@ -12,6 +12,11 @@ unit tests only.
 
 ### Changed
 
+- **Disk-parser panics are contained.** `inspect_iso_kind` wraps the
+  UDF/ISO9660 parsing (hadris-udf/hadris-iso, young binary parsers) in
+  `catch_unwind`, so a panic on a malformed image degrades to `MediaKind::Unknown`
+  instead of crashing the GUI. The workspace builds with `panic = unwind`, which
+  makes this effective. No destructive path is involved.
 - **`inspect_iso_kind` now recognizes generic (e.g. Linux) media as `Generic`.**
   Previously a Linux ISO fell through to `Unknown` (tweaks shown regardless). Added
   an ISO9660 pass (via `hadris-iso`, MIT) after the UDF/Windows pass: a readable
