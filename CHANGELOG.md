@@ -24,6 +24,17 @@ unit tests only.
   `x86_64-pc-windows-gnu`; the pure transport mapping is unit-tested on any host.
   Real-hardware validation is a documented manual procedure (no writing in this
   phase). No partitioning/writing yet.
+- **Hardened `ferrus-win32` before it grows a write path (Phase 6.1.1).** Still
+  read-only, observable behavior unchanged. The system-disk guard now handles a
+  **spanned/RAID system volume**: `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS` returns
+  `ERROR_MORE_DATA` for multi-disk volumes (per MS docs), so the buffer is grown
+  and retried and **all** `DiskNumber`s are collected (not just the first). The
+  IOCTL-buffer parsing was split out of the FFI and unit-tested on any host
+  (multi-extent, truncation, model-string bounds); the model read is bounded to
+  the bytes actually returned; `GetWindowsDirectoryW` no longer risks an
+  out-of-range slice; layout offsets are `const`-asserted against the `windows-sys`
+  ABI on Windows. The ESP/"system volume" on a separate disk is documented as a
+  bounded, deferred case (SPEC-0009). `ferrus-core` stays `#![forbid(unsafe_code)]`.
 
 - **Install target + hardened elevation (packaging).** `make install` /
   `make uninstall` set Ferrus up the way an end user runs it: `ferrus` + `ferrus-gui`
