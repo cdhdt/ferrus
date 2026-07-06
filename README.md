@@ -46,17 +46,21 @@ cross-platform from day one.
 
 ## Screenshots
 
-> Screenshots are not committed yet. Please add them under `docs/screenshots/`.
-> Capture them with **`ICED_BACKEND=tiny-skia ferrus-gui`** (CPU rendering) so the
-> images are pixel-correct — the default `wgpu` backend can render text badly on
-> some GPUs and must not be used for the screenshots.
+Rendered with the CPU backend (`ICED_BACKEND=tiny-skia`).
 
-- `docs/screenshots/select.png` — device + ISO chosen, Windows tweaks ticked.
-- `docs/screenshots/write.png` — a write in progress, live progress bar.
-- `docs/screenshots/dryrun.png` — a dry-run plan (what a real write would do).
+![Selecting a device, an ISO and the Windows tweaks](docs/screenshots/select.png)
 
-<!-- ![Selecting device, ISO and tweaks](docs/screenshots/select.png) -->
-<!-- ![Write in progress](docs/screenshots/write.png) -->
+*Pick a device and an ISO, tick the tweaks. The **Write** button is danger-styled
+and stays disabled until you type the exact device path (type-to-confirm).*
+
+![A real write in progress, with a live progress bar](docs/screenshots/write.png)
+
+*A real write: the progress bar and the streamed log advance while the window
+stays responsive.*
+
+![A dry-run plan — nothing is written](docs/screenshots/dry-run.png)
+
+*A dry run: the full plan, with nothing written.*
 
 ## Requirements
 
