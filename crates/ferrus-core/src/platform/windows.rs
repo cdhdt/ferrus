@@ -9,9 +9,13 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::Result;
 use crate::device::{Bus, Device};
+use crate::partition::windows::{
+    WinPartitionBackend, interpret_format_status, powershell_format_args,
+};
+use crate::partition::{FsKind, GptLayout};
 use crate::platform::Backend;
+use crate::{Error, Result};
 
 /// Windows implementation of [`Backend`].
 #[derive(Debug, Default)]
@@ -61,6 +65,83 @@ fn physical_drive_number(path: &Path) -> Option<u32> {
         .strip_prefix(r"\\.\PhysicalDrive")?
         .parse::<u32>()
         .ok()
+}
+
+/// Parse the drive number, or a typed error for a non-physical-drive path.
+fn require_drive_number(path: &Path) -> Result<u32> {
+    physical_drive_number(path).ok_or_else(|| {
+        Error::UnsafeTarget(format!(
+            "{} is not a \\\\.\\PhysicalDrive path",
+            path.display()
+        ))
+    })
+}
+
+/// Windows implementation of [`WinPartitionBackend`] (SPEC-00010, Phase 6.2a).
+#[derive(Debug, Default)]
+pub struct WindowsPartitionBackend {
+    _private: (),
+}
+
+impl WinPartitionBackend for WindowsPartitionBackend {
+    fn is_elevated(&self) -> Result<bool> {
+        Ok(ferrus_win32::is_process_elevated()?)
+    }
+
+    fn is_system_or_critical(&self, disk: &Path) -> Result<bool> {
+        let Some(number) = physical_drive_number(disk) else {
+            return Ok(true); // fail closed
+        };
+        Ok(ferrus_win32::system_disk_numbers()?.contains(&number))
+    }
+
+    fn read_partition_type_guids(&self, disk: &Path) -> Result<Vec<String>> {
+        let number = require_drive_number(disk)?;
+        Ok(ferrus_win32::read_partition_type_guids(number)?)
+    }
+
+    fn write_gpt_layout(
+        &self,
+        disk: &Path,
+        layout: &GptLayout,
+        disk_size_bytes: u64,
+    ) -> Result<()> {
+        let number = require_drive_number(disk)?;
+        let specs = layout_to_specs(layout);
+        ferrus_win32::write_gpt_layout(number, disk_size_bytes, &specs)?;
+        Ok(())
+    }
+
+    fn format_partition(
+        &self,
+        disk: &Path,
+        partition_number: u32,
+        fs: FsKind,
+        label: &str,
+    ) -> Result<()> {
+        let number = require_drive_number(disk)?;
+        let args = powershell_format_args(number, partition_number, fs, label);
+        let output = std::process::Command::new("powershell.exe")
+            .args(&args)
+            .output()?;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        interpret_format_status(output.status.success(), &stderr)
+    }
+}
+
+/// Map the shared [`GptLayout`] geometry to the win32 partition specs.
+fn layout_to_specs(layout: &GptLayout) -> Vec<ferrus_win32::GptPartitionSpec> {
+    layout
+        .partitions()
+        .iter()
+        .enumerate()
+        .map(|(i, p)| ferrus_win32::GptPartitionSpec {
+            start_bytes: p.start_bytes,
+            size_bytes: p.size_bytes,
+            type_guid: p.type_guid.to_owned(),
+            partition_number: (i + 1) as u32,
+        })
+        .collect()
 }
 
 #[cfg(test)]

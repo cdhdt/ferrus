@@ -262,6 +262,12 @@ pub fn partition_backend() -> Result<Box<dyn PartitionBackend>> {
     }
 }
 
+/// Returns the Windows partition backend (SPEC-00010, Phase 6.2a).
+#[cfg(windows)]
+pub fn win_partition_backend() -> Result<Box<dyn crate::partition::windows::WinPartitionBackend>> {
+    Ok(Box::new(windows::WindowsPartitionBackend::default()))
+}
+
 /// A temporary mount, unmounted (and its mountpoint removed) when dropped.
 ///
 /// The `Drop` implementation is the reliability guarantee of SPEC-0004: both

@@ -13,20 +13,32 @@
 //!   backend injected for testability.
 
 mod plan;
+// The Windows partitioning flow (SPEC-00010). Compiled on Windows and under test
+// (its ordering + ESP guard are unit-tested on any host with a fake backend).
+#[cfg(any(windows, test))]
+pub mod windows;
 
 pub use plan::{
     GptLayout, MICROSOFT_BASIC_DATA_GUID, MIN_DEVICE_BYTES, PlannedPartition,
     compute_windows_layout, partition_path,
 };
 
+#[cfg(not(windows))]
 use std::path::PathBuf;
 
-use crate::device::{SafeTarget, format_size};
+#[cfg(not(windows))]
+use crate::Error;
+use crate::Result;
+use crate::device::SafeTarget;
+#[cfg(not(windows))]
+use crate::device::format_size;
+#[cfg(not(windows))]
 use crate::platform::PartitionBackend;
-use crate::progress::{ProgressSink, Stage};
+use crate::progress::ProgressSink;
+#[cfg(not(windows))]
+use crate::progress::Stage;
 use crate::source::RawImage;
 use crate::windows::WindowsTweaks;
-use crate::{Error, Result};
 
 /// Partition-table style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +70,7 @@ pub enum FsKind {
 /// External tools the Windows-prepare path needs, checked before any write.
 // P2 is not formatted (the UEFI:NTFS image carries its own FAT — SPEC-0005), so
 // mkfs.vfat is no longer required.
+#[cfg(not(windows))]
 const REQUIRED_TOOLS: [&str; 3] = ["sfdisk", "mkfs.ntfs", "partprobe"];
 
 /// Partition and format `target` as the skeleton of a Windows install stick,
@@ -75,6 +88,30 @@ const REQUIRED_TOOLS: [&str; 3] = ["sfdisk", "mkfs.ntfs", "partprobe"];
 /// copying, the SPEC-0004 errors ([`Error::NotWindowsMedia`],
 /// [`Error::InsufficientSpace`], [`Error::VerificationFailed`]).
 pub fn prepare_windows(
+    target: &SafeTarget,
+    image: Option<&RawImage>,
+    tweaks: Option<&WindowsTweaks>,
+    verify: bool,
+    progress: &mut dyn ProgressSink,
+) -> Result<()> {
+    #[cfg(windows)]
+    {
+        // Phase 6.2a: partition + format only. ISO copy (6.2b) and the UEFI:NTFS
+        // bootloader (6.2c) are not wired on Windows yet.
+        let _ = (image, tweaks, verify);
+        let backend = crate::platform::win_partition_backend()?;
+        windows::prepare_partition(target, progress, backend.as_ref())
+    }
+
+    #[cfg(not(windows))]
+    {
+        prepare_windows_linux(target, image, tweaks, verify, progress)
+    }
+}
+
+/// The Linux partition → format → copy → bootloader flow (Phases 3a–3c).
+#[cfg(not(windows))]
+fn prepare_windows_linux(
     target: &SafeTarget,
     image: Option<&RawImage>,
     tweaks: Option<&WindowsTweaks>,
@@ -121,6 +158,7 @@ pub fn prepare_windows(
 
 /// The orchestration with the backend injected, for testing. See SPEC-0003 for
 /// the exact ordering and rationale.
+#[cfg(not(windows))]
 fn prepare_windows_with(
     target: &SafeTarget,
     progress: &mut dyn ProgressSink,
@@ -191,6 +229,7 @@ fn prepare_windows_with(
 }
 
 /// Short label for a filesystem kind (for progress messages).
+#[cfg(not(windows))]
 fn fs_label(fs: FsKind) -> &'static str {
     match fs {
         FsKind::Ntfs => "NTFS",
@@ -198,5 +237,7 @@ fn fs_label(fs: FsKind) -> &'static str {
     }
 }
 
-#[cfg(test)]
+// These exercise the Linux sfdisk orchestration (`prepare_windows_with`), which is
+// itself `cfg(not(windows))`; the Windows flow is tested in `windows.rs`.
+#[cfg(all(test, not(windows)))]
 mod tests;

@@ -12,6 +12,23 @@ unit tests only.
 
 ### Added
 
+- **Windows GPT partitioning + NTFS format (Phase 6.2a, SPEC-00010).** The first
+  real *write* on Windows and the counterpart of Phase 3a: partition a `SafeTarget`
+  USB disk with the SPEC-0003 GPT layout (P1 NTFS basic-data, P2 raw FAT helper) and
+  format P1. The GPT table is written with **native IOCTLs**
+  (`CREATE_DISK` → `SET_DRIVE_LAYOUT_EX` → `UPDATE_PROPERTIES`, after
+  lock/dismounting the disk's volumes) rather than scripting `diskpart`
+  (ADR-0008); NTFS formatting shells out to PowerShell `Format-Volume` (the `mkfs`
+  analogue). A new **ESP guard** closes the SPEC-0009 6.1.1 TODO: before any
+  destructive step the target's current layout is read and a disk carrying an EFI
+  system / Microsoft reserved / recovery partition is refused. Writing requires
+  **Administrator** (fail closed; GUI UAC is a later phase). All Win32 `unsafe` is
+  in `ferrus-win32`; `ferrus-core` stays `#![forbid(unsafe_code)]`. Cross-compiles +
+  clippy-clean on `x86_64-pc-windows-gnu`; the orchestration, ESP guard, format
+  command, and GUID parsing are unit-tested on any host. The IOCTL write is
+  compiled, **not executed** in CI — validated by hand on a throwaway disk
+  (SPEC-00010). No ISO copy or bootloader yet.
+
 - **Windows device enumeration + safe target selection (Phase 6.1, SPEC-0009).**
   The Windows counterpart of Phase 1: list physical disks (`\\.\PhysicalDriveN`),
   classify each by **transport** (USB/SD/MMC removable vs fixed) via
