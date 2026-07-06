@@ -1,13 +1,14 @@
 //! Ferrus graphical front-end (iced — see `docs/adr/0001-gui-framework.md`).
 //!
-//! **Phase 5a**: the complete interface + UX, wired to the engine only through
-//! the core's **dry-run** path (SPEC-0007). Nothing destructive happens here —
-//! the action button runs `prepare_windows` with `dry_run = true`. Real writes,
-//! privilege elevation and the confirmation dialog land in Phase 5b.
+//! The complete interface + UX. It never runs as root: it asks the privileged
+//! `ferrus-helper` (elevated via `pkexec`) to do a **dry-run** (`Simulate`) or a
+//! **real write** (`Write`, erases the target), streaming NDJSON progress back
+//! for a live bar (SPEC-0007, SPEC-0008). Both actions are gated by
+//! **type-to-confirm** (the exact target path must be typed).
 //!
 //! All decisions (enumeration, safe-target authorization, ISO validation,
-//! autounattend generation) live in `ferrus-core`; this crate is presentation +
-//! state orchestration only.
+//! autounattend generation) live in `ferrus-core`, re-validated **root-side** by
+//! the helper; this crate is presentation + state orchestration only.
 
 #![windows_subsystem = "windows"]
 
@@ -15,9 +16,15 @@ use std::path::PathBuf;
 
 use ferrus_core::device::{Device, format_size, list_writable_candidates};
 use ferrus_core::source::{MediaKind, RawImage, inspect_iso_kind};
-use ferrus_helper::{Request, Response, TweaksWire, resolve_helper_path, run_elevated};
+use ferrus_helper::{
+    HelperEvent, Request, SUBCOMMAND_DRY_RUN, SUBCOMMAND_WRITE, TweaksWire, resolve_helper_path,
+    run_streaming,
+};
 
-use iced::widget::{button, checkbox, column, container, row, scrollable, space, text, text_input};
+use futures::channel::mpsc;
+use iced::widget::{
+    button, checkbox, column, container, progress_bar, row, scrollable, space, text, text_input,
+};
 use iced::{Center, Element, Fill, Task, Theme};
 
 fn main() -> iced::Result {
@@ -105,6 +112,11 @@ struct Ferrus {
     /// (elevated) action is allowed (SPEC-0008).
     confirm: String,
     running: bool,
+    /// Current stage label (streamed from the helper).
+    stage: Option<String>,
+    /// Progress within the current stage (bytes/items) and its total, if known.
+    done: u64,
+    total: Option<u64>,
     log: Vec<String>,
     run_error: Option<String>,
 }
@@ -128,8 +140,12 @@ enum Message {
     ToggleRegion(bool),
     RegionLocale(String),
     ConfirmInput(String),
-    Run,
-    RunFinished(Result<Response, String>),
+    /// Start the elevated **dry-run** (simulate).
+    Simulate,
+    /// Start the elevated **real write** (erases the target).
+    Write,
+    /// One streamed progress event from the helper.
+    Streamed(HelperEvent),
 }
 
 impl Ferrus {
@@ -252,47 +268,73 @@ impl Ferrus {
                 self.confirm = value;
                 Task::none()
             }
-            Message::Run => {
-                let Some(request) = self.helper_request() else {
-                    return Task::none();
-                };
-                let Some(helper) = resolve_helper_path() else {
-                    self.run_error = Some(
-                        "ferrus-helper not found — set FERRUS_HELPER, or install it to \
-                         /usr/libexec/ferrus-helper."
-                            .to_owned(),
-                    );
-                    return Task::none();
-                };
-                self.running = true;
-                self.log.clear();
-                self.run_error = None;
-                // Elevate via pkexec and run the forced dry-run in the helper.
-                Task::perform(
-                    async move { run_elevated(&helper, &request) },
-                    Message::RunFinished,
-                )
-            }
-            Message::RunFinished(result) => {
-                self.running = false;
-                match result {
-                    Ok(response) => {
-                        self.log = response.log;
-                        self.run_error = if response.ok {
+            Message::Simulate => self.start(SUBCOMMAND_DRY_RUN),
+            Message::Write => self.start(SUBCOMMAND_WRITE),
+            Message::Streamed(event) => {
+                match event {
+                    HelperEvent::Stage { stage } => {
+                        self.done = 0;
+                        self.total = None;
+                        self.log.push(format!("[{stage}]"));
+                        self.stage = Some(stage);
+                    }
+                    HelperEvent::Advance { done, total } => {
+                        self.done = done;
+                        self.total = total;
+                    }
+                    HelperEvent::Message { text } => self.log.push(text),
+                    HelperEvent::Result { ok, error } => {
+                        self.running = false;
+                        self.stage = None;
+                        self.run_error = if ok {
                             None
                         } else {
-                            Some(
-                                response
-                                    .error
-                                    .unwrap_or_else(|| "helper reported failure".to_owned()),
-                            )
+                            Some(error.unwrap_or_else(|| "operation failed".to_owned()))
                         };
                     }
-                    Err(e) => self.run_error = Some(e),
                 }
                 Task::none()
             }
         }
+    }
+
+    /// Start the elevated helper for `verb` (`dry-run` or `write`): spawn
+    /// `pkexec` on a background thread that streams NDJSON events into an async
+    /// channel, which iced consumes as a `Task` (the UI never blocks).
+    fn start(&mut self, verb: &'static str) -> Task<Message> {
+        let Some(request) = self.helper_request() else {
+            return Task::none();
+        };
+        let Some(helper) = resolve_helper_path() else {
+            self.run_error = Some(
+                "ferrus-helper not found — set FERRUS_HELPER, or install it to \
+                 /usr/libexec/ferrus-helper."
+                    .to_owned(),
+            );
+            return Task::none();
+        };
+        self.running = true;
+        self.log.clear();
+        self.run_error = None;
+        self.stage = None;
+        self.done = 0;
+        self.total = None;
+
+        let (tx, rx) = mpsc::unbounded::<HelperEvent>();
+        std::thread::spawn(move || {
+            let sender = tx.clone();
+            let result = run_streaming(&helper, verb, &request, move |event| {
+                let _ = sender.unbounded_send(event);
+            });
+            if let Err(e) = result {
+                // Spawn/auth failure with no terminal event → synthesize one.
+                let _ = tx.unbounded_send(HelperEvent::Result {
+                    ok: false,
+                    error: Some(e),
+                });
+            }
+        });
+        Task::run(rx, Message::Streamed)
     }
 
     /// Map the UI state to the helper wire tweaks, 1:1. Pure — unit tested.
@@ -496,13 +538,13 @@ impl Ferrus {
     }
 
     fn action_section(&self) -> Element<'_, Message> {
-        let mut col = column![text("4 · Confirm & run (elevated test)").size(20)].spacing(12);
+        let mut col = column![text("4 · Confirm & run").size(20)].spacing(12);
 
-        // Spell out exactly what will happen, unambiguously.
+        // Spell out exactly what the real write will do, unambiguously.
         if let Some(device) = &self.selected {
             col = col.push(
                 text(format!(
-                    "Will ask for admin rights and run a DRY RUN on {} ({}, {}, {}) — nothing is written.",
+                    "Target: {} ({}, {}, {}). Write ERASES ALL DATA on it.",
                     device.path.display(),
                     format_size(device.size_bytes),
                     device.bus,
@@ -512,7 +554,8 @@ impl Ferrus {
             );
         }
 
-        // Type-to-confirm: the exact device path must be typed to unlock the button.
+        // Type-to-confirm: the exact device path must be typed to unlock the
+        // buttons — the guard against wiping the wrong disk (SPEC-0008).
         let placeholder = self
             .selected
             .as_ref()
@@ -524,17 +567,45 @@ impl Ferrus {
                 .width(320),
         );
 
-        let label = if self.running {
-            "Elevating…"
-        } else {
-            "Test elevation (dry run — no data written)"
-        };
+        // Two actions, both behind the same type-to-confirm gate: a safe dry-run
+        // and the real, destructive write.
+        let ready = self.can_run();
+        let write_label = self
+            .selected
+            .as_ref()
+            .map(|d| format!("Write — ERASES ALL DATA on {}", d.path.display()))
+            .unwrap_or_else(|| "Write".to_owned());
         col = col.push(
-            button(text(label).size(16))
-                .padding([10, 20])
-                .style(button::primary)
-                .on_press_maybe(self.can_run().then_some(Message::Run)),
+            row![
+                button(text("Simulate (dry run)").size(15))
+                    .padding([10, 18])
+                    .style(button::secondary)
+                    .on_press_maybe(ready.then_some(Message::Simulate)),
+                button(text(write_label).size(15))
+                    .padding([10, 18])
+                    .style(button::danger)
+                    .on_press_maybe(ready.then_some(Message::Write)),
+            ]
+            .spacing(12),
         );
+
+        // Live progress while the helper runs.
+        if self.running {
+            let stage = self.stage.as_deref().unwrap_or("working");
+            let detail = match self.total {
+                Some(total) if total > 0 => {
+                    let pct = (self.done.saturating_mul(100) / total).min(100);
+                    col = col.push(progress_bar(0.0..=1.0, self.done as f32 / total as f32));
+                    format!(
+                        "{stage} — {pct}% ({} / {})",
+                        format_size(self.done),
+                        format_size(total)
+                    )
+                }
+                _ => format!("{stage} …"),
+            };
+            col = col.push(text(detail).size(13));
+        }
 
         if let Some(err) = &self.run_error {
             col = col.push(text(format!("⚠ Error: {err}")));

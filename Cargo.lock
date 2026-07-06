@@ -987,6 +987,7 @@ version = "0.4.0"
 dependencies = [
  "ferrus-core",
  "ferrus-helper",
+ "futures",
  "iced",
  "rfd",
 ]
