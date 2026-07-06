@@ -28,11 +28,13 @@ fn iso() -> IsoInfo {
     }
 }
 
-/// A state that is ready to run (device + ISO selected).
+/// A state that is ready to run: device + ISO selected and the target path typed
+/// into the type-to-confirm field.
 fn ready() -> Ferrus {
     let mut s = Ferrus::default();
     let _ = s.update(Message::SelectDevice(dev("/dev/sdb")));
     let _ = s.update(Message::IsoValidated(Ok(iso())));
+    let _ = s.update(Message::ConfirmInput("/dev/sdb".to_owned()));
     s
 }
 
@@ -52,14 +54,13 @@ fn tweaks_map_state_one_to_one() {
         ..Ferrus::default()
     };
 
-    let t = s.tweaks();
+    let t = s.tweaks_wire();
     assert!(t.bypass_hardware);
     assert!(t.minimize_telemetry);
     assert!(t.disable_auto_bitlocker);
-    let account = t.local_account.expect("account present");
-    assert_eq!(account.name, "ferrus");
-    assert_eq!(account.password.as_deref(), Some("hunter2"));
-    assert_eq!(t.region.expect("region present").locale, "fr-FR");
+    assert_eq!(t.account_name.as_deref(), Some("ferrus"));
+    assert_eq!(t.account_password.as_deref(), Some("hunter2"));
+    assert_eq!(t.region.as_deref(), Some("fr-FR"));
 }
 
 #[test]
@@ -70,15 +71,16 @@ fn empty_password_maps_to_none() {
         // password left empty
         ..Ferrus::default()
     };
-    let account = s.tweaks().local_account.expect("account present");
-    assert_eq!(account.password, None);
+    let t = s.tweaks_wire();
+    assert_eq!(t.account_name.as_deref(), Some("ferrus"));
+    assert_eq!(t.account_password, None);
 }
 
 #[test]
 fn account_disabled_means_no_local_account() {
-    let s = Ferrus::default();
-    assert!(s.tweaks().local_account.is_none());
-    assert!(!s.tweaks().any());
+    let t = Ferrus::default().tweaks_wire();
+    assert!(t.account_name.is_none());
+    assert!(t.account_password.is_none());
 }
 
 // --- password hygiene -----------------------------------------------------
@@ -100,7 +102,7 @@ fn password_never_appears_in_debug() {
 // --- run / gating predicates ----------------------------------------------
 
 #[test]
-fn cannot_run_until_device_and_iso_selected() {
+fn cannot_run_until_device_iso_and_confirmation() {
     let mut s = Ferrus::default();
     assert!(!s.can_run(), "nothing selected");
 
@@ -108,7 +110,37 @@ fn cannot_run_until_device_and_iso_selected() {
     assert!(!s.can_run(), "device only");
 
     let _ = s.update(Message::IsoValidated(Ok(iso())));
-    assert!(s.can_run(), "device + ISO");
+    assert!(!s.can_run(), "device + ISO but not yet confirmed");
+
+    let _ = s.update(Message::ConfirmInput("/dev/sdb".to_owned()));
+    assert!(s.can_run(), "device + ISO + exact confirmation");
+}
+
+// --- type-to-confirm (the guard against wiping the wrong disk) -------------
+
+#[test]
+fn confirmation_must_match_the_device_path_exactly() {
+    let mut s = ready();
+    assert!(s.can_run());
+
+    let _ = s.update(Message::ConfirmInput("/dev/sdc".to_owned()));
+    assert!(!s.can_run(), "a non-matching path keeps the action blocked");
+
+    let _ = s.update(Message::ConfirmInput("/dev/sdb".to_owned()));
+    assert!(s.can_run(), "the exact path unlocks it");
+}
+
+#[test]
+fn changing_device_clears_confirmation() {
+    let mut s = ready();
+    assert!(s.can_run());
+    // Selecting a different device invalidates the confirmation.
+    let _ = s.update(Message::SelectDevice(dev("/dev/sdc")));
+    assert!(
+        s.confirm.is_empty(),
+        "confirmation cleared on device change"
+    );
+    assert!(!s.can_run(), "re-blocked until the new device is confirmed");
 }
 
 #[test]

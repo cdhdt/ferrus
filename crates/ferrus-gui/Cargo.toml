@@ -15,6 +15,9 @@ path = "src/main.rs"
 [dependencies]
 # The engine. The GUI consumes it and adds no business logic of its own.
 ferrus-core = { path = "../ferrus-core" }
+# The privileged-helper contract + client (pkexec). The GUI never runs as root;
+# it asks the helper (SPEC-0008). Pulls the Request/Response types + run_elevated.
+ferrus-helper = { path = "../ferrus-helper" }
 # GUI framework: iced (ADR-0001). Versions verified against crates.io, not from
 # memory: iced 0.14 is the latest stable (functional application API).
 #

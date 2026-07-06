@@ -13,11 +13,9 @@
 
 use std::path::PathBuf;
 
-use ferrus_core::device::{Device, SafeTarget, format_size, list_writable_candidates};
-use ferrus_core::partition::prepare_windows;
-use ferrus_core::progress::{ProgressSink, Stage};
+use ferrus_core::device::{Device, format_size, list_writable_candidates};
 use ferrus_core::source::{MediaKind, RawImage, inspect_iso_kind};
-use ferrus_core::windows::{LocalAccountSpec, RegionSpec, WindowsTweaks};
+use ferrus_helper::{Request, Response, TweaksWire, resolve_helper_path, run_elevated};
 
 use iced::widget::{button, checkbox, column, container, row, scrollable, space, text, text_input};
 use iced::{Center, Element, Fill, Task, Theme};
@@ -103,6 +101,9 @@ struct Ferrus {
     region_enabled: bool,
     region_locale: String,
 
+    /// Type-to-confirm: the user must type the exact target path before the
+    /// (elevated) action is allowed (SPEC-0008).
+    confirm: String,
     running: bool,
     log: Vec<String>,
     run_error: Option<String>,
@@ -126,8 +127,9 @@ enum Message {
     ToggleBitlocker(bool),
     ToggleRegion(bool),
     RegionLocale(String),
+    ConfirmInput(String),
     Run,
-    RunFinished(Result<Vec<String>, String>),
+    RunFinished(Result<Response, String>),
 }
 
 impl Ferrus {
@@ -174,6 +176,10 @@ impl Ferrus {
                 load_devices(on)
             }
             Message::SelectDevice(device) => {
+                // Changing the target invalidates any prior confirmation.
+                if self.selected.as_ref().is_none_or(|s| s.path != device.path) {
+                    self.confirm.clear();
+                }
                 self.selected = Some(device);
                 Task::none()
             }
@@ -242,25 +248,45 @@ impl Ferrus {
                 self.region_locale = v;
                 Task::none()
             }
+            Message::ConfirmInput(value) => {
+                self.confirm = value;
+                Task::none()
+            }
             Message::Run => {
-                let (Some(device), Some(iso)) = (self.selected.clone(), self.iso.clone()) else {
+                let Some(request) = self.helper_request() else {
                     return Task::none();
                 };
-                let tweaks = self.tweaks();
+                let Some(helper) = resolve_helper_path() else {
+                    self.run_error = Some(
+                        "ferrus-helper not found — set FERRUS_HELPER, or install it to \
+                         /usr/libexec/ferrus-helper."
+                            .to_owned(),
+                    );
+                    return Task::none();
+                };
                 self.running = true;
                 self.log.clear();
                 self.run_error = None;
+                // Elevate via pkexec and run the forced dry-run in the helper.
                 Task::perform(
-                    async move { run_dry_run(device, iso.path, tweaks) },
+                    async move { run_elevated(&helper, &request) },
                     Message::RunFinished,
                 )
             }
             Message::RunFinished(result) => {
                 self.running = false;
                 match result {
-                    Ok(lines) => {
-                        self.log = lines;
-                        self.run_error = None;
+                    Ok(response) => {
+                        self.log = response.log;
+                        self.run_error = if response.ok {
+                            None
+                        } else {
+                            Some(
+                                response
+                                    .error
+                                    .unwrap_or_else(|| "helper reported failure".to_owned()),
+                            )
+                        };
                     }
                     Err(e) => self.run_error = Some(e),
                 }
@@ -269,23 +295,39 @@ impl Ferrus {
         }
     }
 
-    /// Map the UI state to the core's `WindowsTweaks`, 1:1. Pure — unit tested.
-    fn tweaks(&self) -> WindowsTweaks {
-        WindowsTweaks {
+    /// Map the UI state to the helper wire tweaks, 1:1. Pure — unit tested.
+    fn tweaks_wire(&self) -> TweaksWire {
+        TweaksWire {
             bypass_hardware: self.bypass_hardware,
-            local_account: self.account_enabled.then(|| LocalAccountSpec {
-                name: self.account_name.clone(),
-                password: {
-                    let p = self.account_password.as_str();
-                    (!p.is_empty()).then(|| p.to_owned())
-                },
-            }),
+            account_name: self.account_enabled.then(|| self.account_name.clone()),
+            account_password: {
+                let p = self.account_password.as_str();
+                (self.account_enabled && !p.is_empty()).then(|| p.to_owned())
+            },
             minimize_telemetry: self.minimize_telemetry,
             disable_auto_bitlocker: self.disable_auto_bitlocker,
-            region: self.region_enabled.then(|| RegionSpec {
-                locale: self.region_locale.clone(),
-            }),
+            region: self.region_enabled.then(|| self.region_locale.clone()),
         }
+    }
+
+    /// Build the helper request from the current selection, or `None` if a device
+    /// or image is missing. The `target` is only a proposal — the helper
+    /// re-validates it as root.
+    fn helper_request(&self) -> Option<Request> {
+        let device = self.selected.as_ref()?;
+        let iso = self.iso.as_ref()?;
+        Some(Request {
+            target: device.path.to_string_lossy().into_owned(),
+            image: Some(iso.path.to_string_lossy().into_owned()),
+            tweaks: self.tweaks_wire(),
+        })
+    }
+
+    /// Whether the typed confirmation matches the selected device path exactly.
+    fn confirm_matches(&self) -> bool {
+        self.selected
+            .as_ref()
+            .is_some_and(|d| self.confirm == d.path.to_string_lossy())
     }
 
     /// Whether the Windows tweaks section should be shown: an ISO is selected and
@@ -300,6 +342,7 @@ impl Ferrus {
         self.selected.is_some()
             && self.iso.is_some()
             && !self.running
+            && self.confirm_matches()
             && (!self.account_enabled || !self.account_name.trim().is_empty())
             && (!self.region_enabled || !self.region_locale.trim().is_empty())
     }
@@ -453,17 +496,45 @@ impl Ferrus {
     }
 
     fn action_section(&self) -> Element<'_, Message> {
-        let label = if self.running {
-            "Simulating…"
-        } else {
-            "Simulate (dry run)"
-        };
-        let run_button = button(text(label).size(16))
-            .padding([10, 20])
-            .style(button::primary)
-            .on_press_maybe(self.can_run().then_some(Message::Run));
+        let mut col = column![text("4 · Confirm & run (elevated test)").size(20)].spacing(12);
 
-        let mut col = column![run_button].spacing(12);
+        // Spell out exactly what will happen, unambiguously.
+        if let Some(device) = &self.selected {
+            col = col.push(
+                text(format!(
+                    "Will ask for admin rights and run a DRY RUN on {} ({}, {}, {}) — nothing is written.",
+                    device.path.display(),
+                    format_size(device.size_bytes),
+                    device.bus,
+                    device.model.as_deref().unwrap_or("unknown model"),
+                ))
+                .size(13),
+            );
+        }
+
+        // Type-to-confirm: the exact device path must be typed to unlock the button.
+        let placeholder = self
+            .selected
+            .as_ref()
+            .map(|d| format!("Type {} to confirm", d.path.display()))
+            .unwrap_or_else(|| "Select a device first".to_owned());
+        col = col.push(
+            text_input(&placeholder, &self.confirm)
+                .on_input(Message::ConfirmInput)
+                .width(320),
+        );
+
+        let label = if self.running {
+            "Elevating…"
+        } else {
+            "Test elevation (dry run — no data written)"
+        };
+        col = col.push(
+            button(text(label).size(16))
+                .padding([10, 20])
+                .style(button::primary)
+                .on_press_maybe(self.can_run().then_some(Message::Run)),
+        );
 
         if let Some(err) = &self.run_error {
             col = col.push(text(format!("⚠ Error: {err}")));
@@ -538,39 +609,6 @@ async fn validate_iso(path: PathBuf) -> Result<IsoInfo, String> {
             size: img.size_bytes(),
         })
         .map_err(|e| e.to_string())
-}
-
-/// Run the whole flow through the core in **dry-run** — no writes. Returns the
-/// simulated log lines or a message.
-fn run_dry_run(
-    device: Device,
-    iso_path: PathBuf,
-    tweaks: WindowsTweaks,
-) -> Result<Vec<String>, String> {
-    let target =
-        SafeTarget::acquire(device.clone(), &device.path, true).map_err(|e| e.to_string())?;
-    let image = RawImage::open(&iso_path).map_err(|e| e.to_string())?;
-    let tweaks_opt = if tweaks.any() { Some(&tweaks) } else { None };
-    let mut sink = LogSink::default();
-    prepare_windows(&target, Some(&image), tweaks_opt, false, &mut sink)
-        .map_err(|e| e.to_string())?;
-    Ok(sink.lines)
-}
-
-/// A `ProgressSink` that collects the (simulated) steps as text lines.
-#[derive(Default)]
-struct LogSink {
-    lines: Vec<String>,
-}
-
-impl ProgressSink for LogSink {
-    fn stage(&mut self, stage: Stage) {
-        self.lines.push(format!("[{stage:?}]"));
-    }
-    fn advance(&mut self, _done: u64, _total: Option<u64>) {}
-    fn message(&mut self, text: &str) {
-        self.lines.push(text.to_owned());
-    }
 }
 
 #[cfg(test)]
