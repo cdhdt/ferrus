@@ -12,6 +12,23 @@ unit tests only.
 
 ### Added
 
+- **Install target + hardened elevation (packaging).** `make install` /
+  `make uninstall` set Ferrus up the way an end user runs it: `ferrus` + `ferrus-gui`
+  in `/usr/bin`, the root-owned helper in `/usr/libexec` (matching the polkit
+  `exec.path`), the two named polkit actions in `/usr/share/polkit-1/actions`, and
+  two desktop entries (normal + a software-rendering variant that forces
+  `ICED_BACKEND=tiny-skia`). `resolve_helper_path` now prefers the installed
+  `/usr/libexec/ferrus-helper` over `$FERRUS_HELPER`, so in production the GUI
+  always elevates through the **named** polkit action and cannot be redirected by
+  the environment; dev (helper not installed) keeps using `$FERRUS_HELPER`
+  (SPEC-0008). Not distro packaging (no .deb/Flatpak).
+- **GUI (Phase 5) is functionally complete and the engine path is `[real]`:** the
+  GUI→helper **write** path was exercised end to end (real 8.5 GB write via the
+  `write` verb with live NDJSON progress; the produced stick booted Windows 11 25H2
+  Setup in QEMU). The GUI's own logic (type-to-confirm, tweak mapping, streaming) is
+  unit-tested. **Still to confirm by hand:** the visual trigger from the iced window
+  (click + confirm field + polkit dialog) and the named polkit action after a real
+  `make install`.
 - **Real write from the GUI + live progress streaming (Phase 5b-2).** The GUI can
   now actually write a device (still **never** as root). A new `write` helper
   subcommand runs the engine destructively (`dry_run = false`), alongside the

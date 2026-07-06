@@ -172,10 +172,19 @@ Proof level is called out per phase: **[real]** = exercised on real hardware;
   (no auto-BitLocker despite the TPM, silent OOBE with `fr-FR`, booted under
   Secure Boot via the signed UEFI:NTFS loader). Telemetry is minimized to the
   edition floor (Required on Home/Pro), not fully off — by design.
-- **Phase 5**: GUI (iced — ADR-0001).
+- **Phase 5** (done): GUI (iced — ADR-0001), unprivileged, driving a polkit-elevated
+  helper (SPEC-0007, SPEC-0008); + install target (`make install`, polkit named
+  actions, desktop entries). — **[real]** for the engine path: the GUI→helper
+  **write** path was exercised end to end (real 8.5 GB write to the USB gadget via
+  the `write` verb — the exact code the GUI's button spawns — with live NDJSON
+  progress, and the produced stick booted Windows 11 25H2 Setup in QEMU). —
+  **[unit]** for the GUI's own logic (type-to-confirm gating, tweak mapping,
+  streaming events). **Still to confirm interactively:** the *visual* trigger from
+  the iced window (mouse click + typing the confirm field + the polkit dialog),
+  and the **named** polkit action after a real `make install`.
 - **Phase 6**: Windows port.
 - **Phase 7**: macOS port.
 
-Not yet done / known gaps: no GUI; Linux-only; UEFI/GPT only (no legacy BIOS);
-per-user (HKCU) privacy toggles deferred (TODO phase4.x+1);
-`cargo clippy`/`cargo fmt` now enforced in CI (GitHub Actions).
+Not yet done / known gaps: Linux-only; UEFI/GPT only (no legacy BIOS); per-user
+(HKCU) privacy toggles deferred (TODO phase4.x+1); interactive GUI click-through +
+installed named-polkit-action path validated by hand, not in CI.
