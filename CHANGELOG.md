@@ -22,13 +22,14 @@ unit tests only.
   always elevates through the **named** polkit action and cannot be redirected by
   the environment; dev (helper not installed) keeps using `$FERRUS_HELPER`
   (SPEC-0008). Not distro packaging (no .deb/Flatpak).
-- **GUI (Phase 5) is complete and `[real]` end to end, interactive trigger
-  included.** After a real `sudo make install`, clicking Write in the installed GUI
-  raised the **named** polkit action (the "…ERASES ALL DATA…" dialog — proving the
-  hardened helper resolution + named action, not the default), and the real write
-  streamed a live progress bar without freezing the window. The engine `write` path
-  was also exercised standalone (real 8.5 GB write; the stick booted Windows 11 25H2
-  Setup in QEMU).
+- **GUI (Phase 5) — write path proven `[real]`.** The destructive path the GUI's
+  *Write* button invokes (unprivileged GUI → type-to-confirm → **named** polkit
+  action → root helper re-validating → live NDJSON progress) was exercised via the
+  helper's `write` verb, byte-identical to what the button spawns: a real 8.5 GB
+  Windows 11 25H2 write completed, streamed live progress, and the produced stick
+  booted Windows Setup in QEMU. The type-to-confirm gate is unit-tested. **Not yet
+  recorded:** the fully on-screen click-through (clicking *Write* in the window,
+  seeing the named polkit dialog and the animated bar live).
 - **Real write from the GUI + live progress streaming (Phase 5b-2).** The GUI can
   now actually write a device (still **never** as root). A new `write` helper
   subcommand runs the engine destructively (`dry_run = false`), alongside the

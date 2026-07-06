@@ -174,17 +174,19 @@ Proof level is called out per phase: **[real]** = exercised on real hardware;
   edition floor (Required on Home/Pro), not fully off — by design.
 - **Phase 5** (done): GUI (iced — ADR-0001), unprivileged, driving a polkit-elevated
   helper (SPEC-0007, SPEC-0008); + install target (`make install`, polkit named
-  actions, desktop entries). — **[real]**, end to end **including the interactive
-  trigger**: after a real `sudo make install`, the installed `ferrus-gui` opened,
-  the type-to-confirm unlocked the Write button on the exact path, clicking Write
-  raised the **named** polkit action (the "…ERASES ALL DATA…" dialog, proving the
-  hardened resolution + named action, not the default), and the real write streamed
-  a live progress bar without freezing the window. The engine `write` path itself
-  was also exercised standalone (real 8.5 GB write to the USB gadget; the produced
-  stick booted Windows 11 25H2 Setup in QEMU). The GUI's own logic (gating, tweak
-  mapping, streaming events) is unit-tested.
+  actions, desktop entries). — **[real]** for the write path: the destructive path
+  the GUI's *Write* button invokes (unprivileged GUI → type-to-confirm → **named**
+  polkit action → root helper re-validating → live NDJSON progress) was exercised
+  via the helper's `write` verb (byte-identical to what the button spawns); a real
+  8.5 GB write of a Windows 11 25H2 ISO to the USB gadget completed, streamed live
+  progress, and the produced stick booted Windows Setup in QEMU. The GUI's own logic
+  (type-to-confirm gating, tweak mapping, streaming events) is unit-tested. **Not yet
+  recorded:** the fully on-screen click-through — clicking *Write* in the window and
+  seeing the named polkit dialog + the animated bar live.
 - **Phase 6**: Windows port.
 - **Phase 7**: macOS port.
 
 Not yet done / known gaps: Linux-only; UEFI/GPT only (no legacy BIOS); per-user
-(HKCU) privacy toggles deferred (TODO phase4.x+1).
+(HKCU) privacy toggles deferred (TODO phase4.x+1); the fully on-screen GUI
+click-through (clicking Write in the window → named polkit dialog → animated bar)
+not recorded yet (the write path it drives is proven via the helper `write` verb).
