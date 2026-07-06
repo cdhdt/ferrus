@@ -5,7 +5,7 @@
 //! the `TweaksWire -> WindowsTweaks` mapping, secret hygiene at this boundary, and
 //! the fail-closed behavior (never `ok` without a genuine elevated, valid target).
 
-use super::{Request, Response, TweaksWire, run_dry_run};
+use super::{MAX_REQUEST_BYTES, Request, Response, TweaksWire, read_request, run_dry_run};
 
 fn wire(name: Option<&str>, password: Option<&str>) -> TweaksWire {
     TweaksWire {
@@ -44,6 +44,23 @@ fn malformed_request_is_rejected() {
     assert!(serde_json::from_str::<Request>("not json").is_err());
     // Missing required field `target`.
     assert!(serde_json::from_str::<Request>(r#"{"image":null}"#).is_err());
+}
+
+#[test]
+fn read_request_accepts_small_and_rejects_oversized() {
+    // A legitimate request is far under the cap and round-trips.
+    let json = serde_json::to_vec(&request("/dev/sdb")).unwrap();
+    assert!((json.len() as u64) < MAX_REQUEST_BYTES);
+    let req = read_request(json.as_slice()).expect("small request accepted");
+    assert_eq!(req.target, "/dev/sdb");
+
+    // Anything over the cap is rejected cleanly — bounded read, no panic.
+    // (Request has no Debug — secret hygiene — so extract the Err via `.err()`.)
+    let oversized = vec![b' '; (MAX_REQUEST_BYTES + 10) as usize];
+    let err = read_request(oversized.as_slice())
+        .err()
+        .expect("oversized rejected");
+    assert!(err.contains("exceeds"), "got: {err}");
 }
 
 #[test]

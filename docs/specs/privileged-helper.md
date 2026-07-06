@@ -58,6 +58,10 @@ compromised or buggy GUI, or a hand-fed stdin). Therefore:
   refuses if not actually elevated (proves the elevation, and fails closed).
 - **Dry-run is forced.** The helper always calls the engine with `dry_run = true`
   in 5b-1; a real write is structurally impossible here regardless of input.
+- **Bounded stdin.** The request is read with a hard cap (`MAX_REQUEST_BYTES` =
+  64 KiB) via `Read::take`, not an unbounded `read_to_end`. A legitimate request
+  is well under 1 KiB; anything larger is rejected cleanly (`ok: false`), never
+  read into an unbounded allocation. Defense in depth on a root binary.
 
 ## Secret handling
 

@@ -10,7 +10,7 @@
 
 #![forbid(unsafe_code)]
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -25,6 +25,32 @@ use serde::{Deserialize, Serialize};
 /// The one subcommand the helper accepts (also bound in the polkit action's
 /// `org.freedesktop.policykit.exec.argv1`).
 pub const SUBCOMMAND: &str = "dry-run";
+
+/// Maximum accepted request size on stdin. A legitimate request is well under
+/// 1 KiB (a path, an optional image path, a handful of booleans, a short name and
+/// password); 64 KiB is a generous ceiling that still bounds a root binary's input
+/// defensively — no unbounded `read_to_end`.
+pub const MAX_REQUEST_BYTES: u64 = 64 * 1024;
+
+/// Read and parse exactly one [`Request`] from `reader`, rejecting input larger
+/// than [`MAX_REQUEST_BYTES`] (bounded read: over the cap → error, never an
+/// unbounded allocation).
+///
+/// # Errors
+///
+/// Returns a message if the read fails, the input exceeds the cap, or the JSON is
+/// malformed.
+pub fn read_request(reader: impl Read) -> Result<Request, String> {
+    let mut input = Vec::new();
+    reader
+        .take(MAX_REQUEST_BYTES + 1)
+        .read_to_end(&mut input)
+        .map_err(|e| format!("read stdin: {e}"))?;
+    if input.len() as u64 > MAX_REQUEST_BYTES {
+        return Err(format!("request exceeds {MAX_REQUEST_BYTES} bytes"));
+    }
+    serde_json::from_slice(&input).map_err(|e| format!("malformed request: {e}"))
+}
 
 /// Wire form of the Windows tweaks. **No `Debug` derive** — it may carry a
 /// password, which must never reach a log line.

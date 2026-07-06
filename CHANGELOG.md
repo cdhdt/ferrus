@@ -12,6 +12,10 @@ unit tests only.
 
 ### Changed
 
+- **Helper bounds its stdin read.** The privileged helper reads the JSON request
+  with a 64 KiB cap (`Read::take`) instead of an unbounded `read_to_end`; a
+  legitimate request is < 1 KiB, and anything larger is rejected cleanly. Defense
+  in depth on a root binary (SPEC-0008).
 - **Disk-parser panics are contained.** `inspect_iso_kind` wraps the
   UDF/ISO9660 parsing (hadris-udf/hadris-iso, young binary parsers) in
   `catch_unwind`, so a panic on a malformed image degrades to `MediaKind::Unknown`

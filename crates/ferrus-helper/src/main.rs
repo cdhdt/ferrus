@@ -7,10 +7,9 @@
 
 #![forbid(unsafe_code)]
 
-use std::io::Read;
 use std::process::ExitCode;
 
-use ferrus_helper::{Request, Response, SUBCOMMAND, run_dry_run};
+use ferrus_helper::{Response, SUBCOMMAND, read_request, run_dry_run};
 
 fn main() -> ExitCode {
     // Strict subcommand allow-list: exactly `dry-run`, nothing else, no extra args.
@@ -23,22 +22,14 @@ fn main() -> ExitCode {
         }
     }
 
-    let mut input = Vec::new();
-    if let Err(e) = std::io::stdin().read_to_end(&mut input) {
-        return emit(Response {
-            ok: false,
-            log: Vec::new(),
-            error: Some(format!("read stdin: {e}")),
-        });
-    }
-
-    let request: Request = match serde_json::from_slice(&input) {
+    // Bounded stdin read (defensive on a root binary) + parse.
+    let request = match read_request(std::io::stdin()) {
         Ok(request) => request,
         Err(e) => {
             return emit(Response {
                 ok: false,
                 log: Vec::new(),
-                error: Some(format!("malformed request: {e}")),
+                error: Some(e),
             });
         }
     };
