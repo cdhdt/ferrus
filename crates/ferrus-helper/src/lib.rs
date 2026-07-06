@@ -5,12 +5,17 @@
 //! root side** (never trusting the caller), and calls the engine. It adds no
 //! business logic of its own.
 //!
-//! Phase 5b-1: the sole privileged operation is a **forced dry-run** — no write,
-//! format, partition or unmount is possible here. The real write is 5b-2.
+//! Two verbs, each **hardcoding** its destructiveness — the `dry_run` flag is
+//! never carried by the request (a caller must not be able to flip it):
+//! - `dry-run` → `SafeTarget::acquire(.., dry_run = true)` (simulate).
+//! - `write`   → `SafeTarget::acquire(.., dry_run = false)` (real, erases data).
+//!
+//! Progress is streamed to stdout as **NDJSON** (one [`HelperEvent`] per line,
+//! flushed), so the GUI can show a live bar during the minutes-long write.
 
 #![forbid(unsafe_code)]
 
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -22,13 +27,19 @@ use ferrus_core::windows::{LocalAccountSpec, RegionSpec, WindowsTweaks};
 
 use serde::{Deserialize, Serialize};
 
-/// The one subcommand the helper accepts (also bound in the polkit action's
-/// `org.freedesktop.policykit.exec.argv1`).
-pub const SUBCOMMAND: &str = "dry-run";
+/// Simulate: forced dry-run. Bound in the polkit action's `exec.argv1`.
+pub const SUBCOMMAND_DRY_RUN: &str = "dry-run";
+/// Real write: **erases the target**. Bound in a separate polkit action.
+pub const SUBCOMMAND_WRITE: &str = "write";
+
+/// Whether `verb` is one of the two accepted subcommands — the argv allow-list.
+#[must_use]
+pub fn accepted_verb(verb: &str) -> bool {
+    verb == SUBCOMMAND_DRY_RUN || verb == SUBCOMMAND_WRITE
+}
 
 /// Maximum accepted request size on stdin. A legitimate request is well under
-/// 1 KiB (a path, an optional image path, a handful of booleans, a short name and
-/// password); 64 KiB is a generous ceiling that still bounds a root binary's input
+/// 1 KiB; 64 KiB is a generous ceiling that still bounds a root binary's input
 /// defensively — no unbounded `read_to_end`.
 pub const MAX_REQUEST_BYTES: u64 = 64 * 1024;
 
@@ -53,7 +64,8 @@ pub fn read_request(reader: impl Read) -> Result<Request, String> {
 }
 
 /// Wire form of the Windows tweaks. **No `Debug` derive** — it may carry a
-/// password, which must never reach a log line.
+/// password, which must never reach a log line. Note: **no `dry_run` field** —
+/// destructiveness is decided by the subcommand, never by request data.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TweaksWire {
     /// Bypass the Windows 11 hardware checks.
@@ -89,8 +101,8 @@ impl TweaksWire {
 }
 
 /// The request the GUI sends on stdin. **No `Debug` derive** (may carry a
-/// password). The `target` is only a *proposal*; it is re-validated on the root
-/// side.
+/// password) and **no `dry_run` field**. The `target` is only a *proposal*; it is
+/// re-validated on the root side.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Request {
     /// Device path the GUI proposes (e.g. `/dev/sdb`).
@@ -101,101 +113,142 @@ pub struct Request {
     pub tweaks: TweaksWire,
 }
 
-/// The helper's reply on stdout. Carries no secret, so it is safe to print/log.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Response {
-    /// Whether the (dry-run) operation succeeded.
-    pub ok: bool,
-    /// Human-readable simulated steps.
-    pub log: Vec<String>,
-    /// Error message when `ok` is false.
-    pub error: Option<String>,
+/// One streamed progress event (NDJSON, one per line). Carries **no secret**, so
+/// it is safe to print/log. `Result` is always the final event.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum HelperEvent {
+    /// Entered a new stage.
+    Stage {
+        /// Stage label (e.g. `Copying`).
+        stage: String,
+    },
+    /// Progress within a stage: `done`/`total` bytes (or items). `total` is
+    /// `None` when unknown.
+    Advance {
+        /// Work done so far.
+        done: u64,
+        /// Total work, if known.
+        total: Option<u64>,
+    },
+    /// A free-form status line.
+    Message {
+        /// The status text.
+        text: String,
+    },
+    /// Terminal event: the operation finished.
+    Result {
+        /// Whether it succeeded.
+        ok: bool,
+        /// Error message when `ok` is false.
+        error: Option<String>,
+    },
 }
 
-impl Response {
-    fn failed(message: impl Into<String>) -> Self {
-        Self {
-            ok: false,
-            log: Vec::new(),
-            error: Some(message.into()),
-        }
+/// A [`ProgressSink`] that streams each event as one flushed NDJSON line.
+struct StreamSink<W: Write> {
+    out: W,
+}
+
+impl<W: Write> StreamSink<W> {
+    /// Serialize one event as a line and flush. Errors are ignored — a broken
+    /// pipe just means the client went away.
+    fn emit(&mut self, event: &HelperEvent) {
+        let _ = serde_json::to_writer(&mut self.out, event);
+        let _ = self.out.write_all(b"\n");
+        let _ = self.out.flush();
     }
 }
 
-/// Root-side execution: assert we are actually root, **re-validate the target via
-/// the core** (never trust the caller), then run `prepare_windows` in a **forced
-/// dry-run**. This is the entire privileged surface; every decision is a
-/// `ferrus-core` call.
-#[must_use]
-pub fn run_dry_run(request: &Request) -> Response {
+impl<W: Write> ProgressSink for StreamSink<W> {
+    fn stage(&mut self, stage: Stage) {
+        self.emit(&HelperEvent::Stage {
+            stage: format!("{stage:?}"),
+        });
+    }
+    fn advance(&mut self, done: u64, total: Option<u64>) {
+        self.emit(&HelperEvent::Advance { done, total });
+    }
+    fn message(&mut self, text: &str) {
+        self.emit(&HelperEvent::Message {
+            text: text.to_owned(),
+        });
+    }
+}
+
+/// Root-side preparation shared by both verbs. `dry_run` is passed by the caller
+/// (each subcommand hardcodes it — it is **never** in the request): assert we are
+/// actually root, **re-validate the target via the core** (never trust the
+/// caller), validate the image, and run the engine.
+fn run_prepared(
+    request: &Request,
+    dry_run: bool,
+    sink: &mut dyn ProgressSink,
+) -> Result<(), String> {
     // 1. Fail closed unless actually elevated.
     match ferrus_core::platform::effective_uid() {
         Ok(0) => {}
-        Ok(uid) => return Response::failed(format!("helper is not root (euid {uid})")),
-        Err(e) => return Response::failed(format!("cannot read effective uid: {e}")),
+        Ok(uid) => return Err(format!("helper is not root (euid {uid})")),
+        Err(e) => return Err(format!("cannot read effective uid: {e}")),
     }
 
     // 2. Re-validate the target ON THE ROOT SIDE. The GUI proposes; we dispose:
-    //    re-enumerate, then run the single safety checkpoint ourselves.
+    //    re-enumerate, then run the single safety checkpoint ourselves with the
+    //    caller-independent `dry_run` for this verb.
     let target_path = Path::new(&request.target);
-    let device = match list_all_devices() {
-        Ok(devices) => devices.into_iter().find(|d| d.path == target_path),
-        Err(e) => return Response::failed(format!("enumeration failed: {e}")),
-    };
-    let Some(device) = device else {
-        return Response::failed(format!(
-            "{} is not a block device on this host",
-            request.target
-        ));
-    };
-    let target = match SafeTarget::acquire(device, target_path, true) {
-        Ok(target) => target,
-        Err(e) => {
-            return Response::failed(format!("target rejected by the safety checkpoint: {e}"));
-        }
-    };
+    let device = list_all_devices()
+        .map_err(|e| format!("enumeration failed: {e}"))?
+        .into_iter()
+        .find(|d| d.path == target_path)
+        .ok_or_else(|| format!("{} is not a block device on this host", request.target))?;
+    let target = SafeTarget::acquire(device, target_path, dry_run)
+        .map_err(|e| format!("target rejected by the safety checkpoint: {e}"))?;
 
     // 3. Validate the image, if any.
     let image = match &request.image {
-        Some(path) => match RawImage::open(Path::new(path)) {
-            Ok(img) => Some(img),
-            Err(e) => return Response::failed(format!("cannot use image {path}: {e}")),
-        },
+        Some(path) => Some(
+            RawImage::open(Path::new(path)).map_err(|e| format!("cannot use image {path}: {e}"))?,
+        ),
         None => None,
     };
 
-    // 4. Forced dry-run — a real write is structurally impossible in 5b-1.
+    // 4. Run the engine (streaming progress through `sink`).
     let tweaks = request.tweaks.to_tweaks();
     let tweaks_opt = if tweaks.any() { Some(&tweaks) } else { None };
-    let mut sink = LogSink::default();
-    match prepare_windows(&target, image.as_ref(), tweaks_opt, false, &mut sink) {
-        Ok(()) => Response {
-            ok: true,
-            log: sink.lines,
-            error: None,
-        },
-        Err(e) => Response {
-            ok: false,
-            log: sink.lines,
-            error: Some(e.to_string()),
-        },
+    prepare_windows(&target, image.as_ref(), tweaks_opt, false, sink).map_err(|e| e.to_string())
+}
+
+/// Serve one request with `dry_run`, streaming NDJSON events (including the final
+/// `Result`) to `out`. Returns whether it succeeded (for the process exit code).
+fn serve(request: &Request, dry_run: bool, out: impl Write) -> bool {
+    let mut sink = StreamSink { out };
+    match run_prepared(request, dry_run, &mut sink) {
+        Ok(()) => {
+            sink.emit(&HelperEvent::Result {
+                ok: true,
+                error: None,
+            });
+            true
+        }
+        Err(e) => {
+            sink.emit(&HelperEvent::Result {
+                ok: false,
+                error: Some(e),
+            });
+            false
+        }
     }
 }
 
-/// A [`ProgressSink`] collecting the simulated steps as text.
-#[derive(Default)]
-struct LogSink {
-    lines: Vec<String>,
+/// `dry-run` verb: **forced simulation** (`dry_run = true` is a literal here).
+pub fn serve_dry_run(request: &Request, out: impl Write) -> bool {
+    serve(request, true, out)
 }
 
-impl ProgressSink for LogSink {
-    fn stage(&mut self, stage: Stage) {
-        self.lines.push(format!("[{stage:?}]"));
-    }
-    fn advance(&mut self, _done: u64, _total: Option<u64>) {}
-    fn message(&mut self, text: &str) {
-        self.lines.push(text.to_owned());
-    }
+/// `write` verb: **real write** (`dry_run = false` is a literal here). Erases the
+/// target.
+pub fn serve_write(request: &Request, out: impl Write) -> bool {
+    serve(request, false, out)
 }
 
 // --- client side (used by the unprivileged GUI) ---------------------------
@@ -218,27 +271,36 @@ pub fn resolve_helper_path() -> Option<PathBuf> {
     sibling.exists().then_some(sibling)
 }
 
-/// Spawn the helper **elevated via `pkexec`**, sending `request` on stdin (so the
-/// password never touches argv or the environment) and parsing the JSON
-/// [`Response`] from stdout.
+/// Spawn the helper **elevated via `pkexec`** for `verb` (`dry-run` or `write`),
+/// send `request` on stdin (so the password never touches argv or the
+/// environment), and stream each stdout NDJSON line to `on_event` until EOF.
+///
+/// **Blocking** — run it on a background thread and forward the events into an
+/// async channel (the GUI does exactly this). No `wait_with_output`: events are
+/// delivered live.
 ///
 /// # Errors
 ///
-/// Returns a message if the helper cannot be spawned, if authentication is
-/// dismissed/denied, or if the reply cannot be parsed.
-pub fn run_elevated(helper: &Path, request: &Request) -> Result<Response, String> {
+/// Returns a message if the helper cannot be spawned, or if authentication is
+/// dismissed/denied (no `Result` event was produced).
+pub fn run_streaming(
+    helper: &Path,
+    verb: &str,
+    request: &Request,
+    mut on_event: impl FnMut(HelperEvent),
+) -> Result<(), String> {
     let payload = serde_json::to_vec(request).map_err(|e| format!("encode request: {e}"))?;
 
     let mut child = Command::new("pkexec")
         .arg(helper)
-        .arg(SUBCOMMAND)
+        .arg(verb)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("cannot spawn pkexec: {e}"))?;
 
-    // Write and close stdin so the helper sees EOF, then collect the output.
+    // Write and close stdin so the helper sees EOF, then stream stdout by line.
     child
         .stdin
         .take()
@@ -246,20 +308,35 @@ pub fn run_elevated(helper: &Path, request: &Request) -> Result<Response, String
         .write_all(&payload)
         .map_err(|e| format!("write request: {e}"))?;
 
-    let output = child
-        .wait_with_output()
-        .map_err(|e| format!("helper did not complete: {e}"))?;
-
-    if output.stdout.is_empty() {
-        // No JSON body → pkexec dismissed (126) / not authorized (127), or a crash.
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "elevation failed ({}): {}",
-            output.status,
-            stderr.trim()
-        ));
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "no stdout pipe from the helper".to_owned())?;
+    let mut saw_result = false;
+    for line in BufReader::new(stdout).lines() {
+        let line = line.map_err(|e| format!("read helper output: {e}"))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Ok(event) = serde_json::from_str::<HelperEvent>(&line) {
+            saw_result |= matches!(event, HelperEvent::Result { .. });
+            on_event(event);
+        }
+        // Non-JSON noise on stdout is ignored, not fatal.
     }
-    serde_json::from_slice::<Response>(&output.stdout).map_err(|e| format!("bad helper reply: {e}"))
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("helper did not complete: {e}"))?;
+    if !saw_result {
+        // No terminal event → pkexec dismissed (126) / not authorized (127) / crash.
+        let mut stderr = String::new();
+        if let Some(mut err) = child.stderr.take() {
+            let _ = err.read_to_string(&mut stderr);
+        }
+        return Err(format!("elevation failed ({status}): {}", stderr.trim()));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
