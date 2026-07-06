@@ -495,7 +495,9 @@ version = "0.4.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
+ "iana-time-zone",
  "num-traits",
+ "windows-link",
 ]
 
 [[package]]
@@ -858,6 +860,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
+name = "endian-num"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b4a54dfedecb1dc004776a597db0c858cf6c31579296734511309291b8399ce"
+dependencies = [
+ "bytemuck",
+ "bytemuck_derive",
+]
+
+[[package]]
 name = "enumflags2"
 version = "0.7.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -960,6 +972,7 @@ name = "ferrus-core"
 version = "0.4.0"
 dependencies = [
  "base64",
+ "hadris-iso",
  "hadris-udf",
  "libc",
  "roxmltree 0.21.1",
@@ -1332,12 +1345,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "hadris-iso"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ff7c040f72939353e60b43e523d4760f2a4a68e3c01e000fb690379f9990375"
+dependencies = [
+ "bitflags 2.13.0",
+ "bytemuck",
+ "chrono",
+ "hadris-common",
+ "hadris-io",
+ "hadris-macros",
+ "hadris-part",
+ "spin",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "hadris-macros"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae6aa7d2c5aab41cb4f4d825c71e08b7a61e6d9e9ea78a9b3ef5ef3eeac9efac"
 dependencies = [
  "proc-macro2",
+]
+
+[[package]]
+name = "hadris-part"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83db7c5a6d4bd428c30fedaa9882b50baaf4cdc1831a948e1bd6de593e3f48ea"
+dependencies = [
+ "bytemuck",
+ "endian-num",
+ "hadris-io",
+ "hadris-macros",
 ]
 
 [[package]]
@@ -1435,6 +1478,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "818356c5132c1fede50f837ca96afbe78ff42413047f4abb886217845e1b6c8c"
 dependencies = [
  "typenum",
+]
+
+[[package]]
+name = "iana-time-zone"
+version = "0.1.65"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e31bc9ad994ba00e440a8aa5c9ef0ec67d5cb5e5cb0cc7f8b744a35b389cc470"
+dependencies = [
+ "android_system_properties",
+ "core-foundation-sys",
+ "iana-time-zone-haiku",
+ "js-sys",
+ "log",
+ "wasm-bindgen",
+ "windows-core 0.62.2",
+]
+
+[[package]]
+name = "iana-time-zone-haiku"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

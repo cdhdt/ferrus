@@ -126,59 +126,105 @@ pub enum MediaKind {
     Unknown,
 }
 
-/// Classify a UDF root directory from its entry names. Pure, unit-tested.
+/// Whether a **UDF** root directory (by entry name) is Windows install media.
+/// Pure, unit-tested.
 ///
 /// Windows install media carries `bootmgr`, an `efi` directory and a `sources`
 /// directory at the root — structure markers that live in the **UDF** layer of
 /// modern Windows ISOs. `install.wim` is deliberately **not** part of the
 /// criterion: it is UDF-only and huge, and it is a *copy* concern (Phase 3b), not
 /// a *detection* one — keying on it would false-negative the main case (SPEC-0007).
-fn classify_root_entries(names: &[String]) -> MediaKind {
+fn udf_root_is_windows(names: &[String]) -> bool {
     let has = |marker: &str| names.iter().any(|n| n.eq_ignore_ascii_case(marker));
-    if has("bootmgr") && has("sources") && has("efi") {
-        MediaKind::Windows
-    } else {
-        MediaKind::Generic
-    }
+    has("bootmgr") && has("sources") && has("efi")
 }
 
-/// Preliminary, unprivileged, no-mount guess at whether `path` is Windows install
-/// media — a **hint** for the GUI (SPEC-0007), never the authority.
+/// Whether an **ISO9660** root directory (by entry name) looks like a real,
+/// content-bearing generic image (e.g. Linux). Pure, unit-tested.
 ///
-/// Modern Windows ISOs ship their real tree in **UDF** (their ISO9660 layer is a
-/// stub), so this reads the UDF layer read-only, lists the root directory, and
-/// classifies by structure markers. Any failure to read (not UDF, not an image,
-/// I/O error) yields [`MediaKind::Unknown`] — never a false `Generic`.
+/// Criterion: at least two "real" root entries, ignoring the `.`/`..` self/parent
+/// records (control-byte names), the El-Torito `boot.catalog`, and anything
+/// without an alphanumeric character. Established empirically (SPEC-0007): a real
+/// Ubuntu ISO has ~8 such entries, whereas a Windows ISO's ISO9660 layer is a
+/// **stub** with a single `README.TXT` — so the threshold of 2 cleanly separates
+/// them and never mistakes a Windows stub for generic media.
+fn iso9660_root_looks_generic(names: &[String]) -> bool {
+    let real = names
+        .iter()
+        .filter(|raw| {
+            let base = raw.split(';').next().unwrap_or("").trim();
+            !base.is_empty()
+                && base.chars().any(|c| c.is_ascii_alphanumeric())
+                && !base.eq_ignore_ascii_case("boot.catalog")
+        })
+        .count();
+    real >= 2
+}
+
+/// Preliminary, unprivileged, no-mount guess at what `path` is — a **hint** for
+/// the GUI (SPEC-0007), never the authority (`detect_windows_install` on the
+/// mounted ISO decides at write time).
+///
+/// Order matters: modern Windows ISOs ship their real tree in **UDF** (their
+/// ISO9660 layer is a stub), so the UDF pass is tried first and wins. A generic
+/// image (e.g. Linux) has a full readable **ISO9660** tree, recognised second.
+/// Anything unreadable/indeterminate is [`MediaKind::Unknown`] — never a false
+/// `Generic` or a false `Windows`.
 #[must_use]
 pub fn inspect_iso_kind(path: &Path) -> MediaKind {
-    let Ok(file) = File::open(path) else {
-        return MediaKind::Unknown;
-    };
-    let Ok(udf) = hadris_udf::UdfFs::open(std::io::BufReader::new(file)) else {
-        return MediaKind::Unknown;
-    };
-    let Ok(root) = udf.root_dir() else {
-        return MediaKind::Unknown;
-    };
-    let names: Vec<String> = root
-        .entries()
-        .map(|entry| entry.name().to_string())
-        .collect();
-    classify_root_entries(&names)
+    // 1. UDF pass — Windows install media.
+    if udf_root_names(path).is_some_and(|names| udf_root_is_windows(&names)) {
+        return MediaKind::Windows;
+    }
+    // 2. ISO9660 pass — a readable, content-bearing tree without Windows markers
+    //    is a generic (e.g. Linux) image.
+    if iso9660_root_names(path).is_some_and(|names| iso9660_root_looks_generic(&names)) {
+        return MediaKind::Generic;
+    }
+    // 3. Neither — we do not know.
+    MediaKind::Unknown
+}
+
+/// Read the UDF root directory entry names, or `None` if the image has no
+/// readable UDF layer.
+fn udf_root_names(path: &Path) -> Option<Vec<String>> {
+    let file = File::open(path).ok()?;
+    let udf = hadris_udf::UdfFs::open(std::io::BufReader::new(file)).ok()?;
+    let root = udf.root_dir().ok()?;
+    Some(
+        root.entries()
+            .map(|entry| entry.name().to_string())
+            .collect(),
+    )
+}
+
+/// Read the ISO9660 root directory entry names, or `None` if the image has no
+/// readable ISO9660 layer.
+fn iso9660_root_names(path: &Path) -> Option<Vec<String>> {
+    let file = File::open(path).ok()?;
+    let image = hadris_iso::IsoImage::open(file).ok()?;
+    let root = image.root_dir();
+    let mut names = Vec::new();
+    for entry in root.iter(&image).entries().flatten() {
+        names.push(String::from_utf8_lossy(entry.name()).into_owned());
+    }
+    Some(names)
 }
 
 #[cfg(test)]
 mod tests {
     use std::io::Write;
 
-    use super::{MediaKind, classify_root_entries, inspect_iso_kind};
+    use super::{MediaKind, inspect_iso_kind, iso9660_root_looks_generic, udf_root_is_windows};
 
     fn names(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| (*s).to_owned()).collect()
     }
 
+    // --- UDF (Windows) classification -------------------------------------
+
     #[test]
-    fn windows_structure_markers_classify_as_windows() {
+    fn udf_windows_structure_markers() {
         let root = names(&[
             "bootmgr",
             "bootmgr.efi",
@@ -187,29 +233,62 @@ mod tests {
             "setup.exe",
             "boot",
         ]);
-        assert_eq!(classify_root_entries(&root), MediaKind::Windows);
+        assert!(udf_root_is_windows(&root));
     }
 
     #[test]
-    fn classification_is_case_insensitive() {
-        let root = names(&["BOOTMGR", "EFI", "SOURCES"]);
-        assert_eq!(classify_root_entries(&root), MediaKind::Windows);
+    fn udf_classification_is_case_insensitive() {
+        assert!(udf_root_is_windows(&names(&["BOOTMGR", "EFI", "SOURCES"])));
     }
 
     #[test]
-    fn missing_a_marker_is_generic() {
+    fn udf_missing_a_marker_is_not_windows() {
         // A generic bootable image: EFI + boot dir, but no bootmgr/sources.
-        let root = names(&["efi", "boot", "casper", "isolinux", "pool"]);
-        assert_eq!(classify_root_entries(&root), MediaKind::Generic);
-        // install.wim alone must NOT drive detection (UDF-trap guard).
-        assert_eq!(
-            classify_root_entries(&names(&["sources"])),
-            MediaKind::Generic
-        );
+        assert!(!udf_root_is_windows(&names(&[
+            "efi", "boot", "casper", "isolinux", "pool"
+        ])));
+        // `sources` alone must NOT read as Windows (UDF-trap guard).
+        assert!(!udf_root_is_windows(&names(&["sources"])));
+    }
+
+    // --- ISO9660 (generic) classification ---------------------------------
+
+    #[test]
+    fn iso9660_full_tree_is_generic() {
+        // A real Ubuntu ISO9660 root (verified empirically, SPEC-0007).
+        let root = names(&[
+            "\u{0}",
+            "\u{1}", // the `.` / `..` records
+            ".DISK",
+            "BOOT",
+            "BOOT.CATALOG;1",
+            "CASPER",
+            "DISTS",
+            "EFI",
+            "MD5SUM.TXT;1",
+            "POOL",
+            "UBUNTU.;1",
+        ]);
+        assert!(iso9660_root_looks_generic(&root));
     }
 
     #[test]
-    fn unreadable_or_non_udf_is_unknown_not_generic() {
+    fn iso9660_windows_stub_is_not_generic() {
+        // A Windows ISO's ISO9660 layer is a stub: `.`/`..` + README.TXT only.
+        let stub = names(&["\u{0}", "\u{1}", "README.TXT"]);
+        assert!(!iso9660_root_looks_generic(&stub));
+        // The boot catalog alone is not "content".
+        assert!(!iso9660_root_looks_generic(&names(&[
+            "\u{0}",
+            "\u{1}",
+            "BOOT.CATALOG;1"
+        ])));
+    }
+
+    // --- end to end (unreadable → Unknown) --------------------------------
+
+    #[test]
+    fn unreadable_or_unknown_is_unknown_not_generic() {
         // Non-existent path.
         assert_eq!(
             inspect_iso_kind(std::path::Path::new("/no/such/file.iso")),

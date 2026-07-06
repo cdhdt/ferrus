@@ -55,7 +55,11 @@ Rationale, and why its immaturity is acceptable here:
 ## Consequences
 
 - `ferrus-core` gains a `hadris-udf` dependency, used only by
-  `source::inspect_iso_kind`.
+  `source::inspect_iso_kind`. Its sibling **`hadris-iso`** (same author, same MIT
+  license) was later added for the ISO9660 *generic-media* pass — a real Ubuntu
+  ISO keeps its tree in ISO9660, so detecting it needs an ISO9660 reader. The same
+  reasoning applies: both back a non-authoritative hint, never a destructive
+  decision, so their immaturity is acceptable.
 - `install.wim` is deliberately **not** part of the detection criterion (it is
   UDF-only and huge — a copy concern, not a detection one), avoiding the
   false-negative trap.

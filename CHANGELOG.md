@@ -10,6 +10,16 @@ unit tests only.
 
 ## [Unreleased]
 
+### Changed
+
+- **`inspect_iso_kind` now recognizes generic (e.g. Linux) media as `Generic`.**
+  Previously a Linux ISO fell through to `Unknown` (tweaks shown regardless). Added
+  an ISO9660 pass (via `hadris-iso`, MIT) after the UDF/Windows pass: a readable
+  ISO9660 tree with ≥ 2 real root entries and no Windows markers → `Generic`, so
+  the GUI hides the Windows tweaks. Verified end-to-end on real media: Ubuntu 26.04
+  → `Generic`, Windows 11 25H2 → `Windows`; unreadable → `Unknown` (never a false
+  `Generic`/`Windows`). Still a non-authoritative hint (SPEC-0007).
+
 ### Added
 
 - **Privileged helper + polkit elevation + type-to-confirm** (Phase 5b-1;

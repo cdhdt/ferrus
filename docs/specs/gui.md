@@ -99,17 +99,27 @@ A **non-authoritative hint** — `source::inspect_iso_kind(path) -> MediaKind
 { Windows, Generic, Unknown }` — computed **unprivileged and without mounting** at
 ISO-selection time, to drive the tweaks gating.
 
-- **The UDF trap (empirically established).** On a real 25H2 ISO, the ISO9660 layer
-  is a **stub** (root = only `README.TXT`, no Joliet); `bootmgr`, `efi/`, `sources/`
-  and `install.wim` are all **UDF-only**. So a pure-ISO9660 scan — the obvious
-  first approach — would false-negative every real Windows ISO. Detection therefore
-  reads the **UDF** layer (read-only, no mount) via `hadris-udf` (ADR-0006).
-- **Criterion (structure, not `install.wim`).** UDF root contains `bootmgr` +
-  `sources` + `efi` → `Windows`. `install.wim` is deliberately **not** used: it is
-  UDF-only and huge — a *copy* concern (Phase 3b), not a *detection* one. Keying on
-  it would reintroduce the trap.
-- **`Unknown` is honest, not `Generic`.** Any read failure (not UDF, not an image,
-  I/O error) → `Unknown`. We never claim `Generic` for something we could not read.
+- **Two ordered passes, empirically grounded.** Windows and generic media store
+  their tree in *different* layers, so detection tries both, Windows first:
+  1. **UDF pass → `Windows`.** Modern Windows ISOs keep their real tree in **UDF**;
+     their ISO9660 layer is a **stub** (a real 25H2 ISO: root = only `README.TXT`,
+     no Joliet). A pure-ISO9660 scan would false-negative every Windows ISO, so the
+     UDF root is read first (read-only, no mount) via `hadris-udf`. Criterion:
+     root contains `bootmgr` + `sources` + `efi` → `Windows`. `install.wim` is
+     deliberately **not** used (UDF-only, huge — a *copy* concern, not a detection
+     one; keying on it would reintroduce the trap).
+  2. **ISO9660 pass → `Generic`.** A generic image (e.g. Linux) has a full readable
+     **ISO9660** tree (a real Ubuntu 26.04 ISO: 8+ root entries — `boot`, `casper`,
+     `efi`, `pool`, `dists`, …; Joliet + Rock Ridge + El-Torito), read via
+     `hadris-iso`. Criterion: **≥ 2 real root entries** (ignoring the `.`/`..`
+     records, the El-Torito `boot.catalog`, and non-alphanumeric names). The
+     threshold cleanly separates a real tree from a Windows ISO9660 stub (1 entry:
+     `README.TXT`), so a Windows stub is **never** mistaken for generic — and the
+     UDF pass has already claimed real Windows media anyway. Verified end-to-end:
+     Ubuntu → `Generic`, Windows 25H2 → `Windows`.
+- **`Unknown` is honest, not `Generic`.** Neither pass matched (not UDF-Windows,
+  no readable ISO9660 content, or an I/O error) → `Unknown`. We never claim
+  `Generic` for something we could not read, nor `Windows` without the markers.
 - **Hint vs authority.** `inspect_iso_kind` is only a UI hint. The judge is
   `detect_windows_install` on the **mounted** ISO at write time. They can diverge on
   an edge case (structure markers present but no `install.wim`) — acceptable: the
