@@ -22,6 +22,11 @@ hadris-iso = "1.2"
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2.186"
 
+# The audited Win32 FFI (device enumeration). Windows-only; keeps the unsafe out
+# of ferrus-core, which stays `#![forbid(unsafe_code)]` (ADR-0007).
+[target.'cfg(windows)'.dependencies]
+ferrus-win32 = { path = "../ferrus-win32" }
+
 [dev-dependencies]
 roxmltree = "0.21.1"
 tempfile = "3.27.0"

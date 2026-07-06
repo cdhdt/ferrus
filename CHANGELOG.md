@@ -12,6 +12,19 @@ unit tests only.
 
 ### Added
 
+- **Windows device enumeration + safe target selection (Phase 6.1, SPEC-0009).**
+  The Windows counterpart of Phase 1: list physical disks (`\\.\PhysicalDriveN`),
+  classify each by **transport** (USB/SD/MMC removable vs fixed) via
+  `STORAGE_BUS_TYPE`, refuse the disk backing the Windows volume (resolved through
+  `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS`), and feed the **unchanged, shared**
+  `SafeTarget` checkpoint — same safety guarantees as Linux, native API. All Win32
+  `unsafe` is isolated in a new **`ferrus-win32`** crate so `ferrus-core` keeps
+  `#![forbid(unsafe_code)]` (ADR-0007). Enumeration needs **no elevation** (query
+  IOCTLs opened with zero access). Cross-compiles + clippy-clean on
+  `x86_64-pc-windows-gnu`; the pure transport mapping is unit-tested on any host.
+  Real-hardware validation is a documented manual procedure (no writing in this
+  phase). No partitioning/writing yet.
+
 - **Install target + hardened elevation (packaging).** `make install` /
   `make uninstall` set Ferrus up the way an end user runs it: `ferrus` + `ferrus-gui`
   in `/usr/bin`, the root-owned helper in `/usr/libexec` (matching the polkit

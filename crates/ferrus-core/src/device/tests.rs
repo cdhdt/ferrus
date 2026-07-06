@@ -118,3 +118,35 @@ fn format_size_is_human_readable() {
     assert_eq!(format_size(16_000_000_000), "16.0 GB");
     assert_eq!(format_size(2_000_398_934_016), "2.0 TB");
 }
+
+// --- Windows STORAGE_BUS_TYPE mapping (Phase 6.1, SPEC-0009) ---------------
+
+#[test]
+fn windows_bus_type_maps_to_transport() {
+    // The removable transports — the only eligible ones.
+    assert_eq!(Bus::from_windows_bus_type(7), Bus::Usb); // BusTypeUsb
+    assert_eq!(Bus::from_windows_bus_type(12), Bus::Mmc); // BusTypeSd
+    assert_eq!(Bus::from_windows_bus_type(13), Bus::Mmc); // BusTypeMmc
+    // Fixed/internal buses.
+    assert_eq!(Bus::from_windows_bus_type(11), Bus::Sata); // BusTypeSata
+    assert_eq!(Bus::from_windows_bus_type(3), Bus::Sata); // BusTypeAta
+    assert_eq!(Bus::from_windows_bus_type(17), Bus::Nvme); // BusTypeNvme
+    assert_eq!(Bus::from_windows_bus_type(1), Bus::Scsi); // BusTypeScsi
+    assert_eq!(Bus::from_windows_bus_type(10), Bus::Scsi); // BusTypeSas
+}
+
+#[test]
+fn windows_virtual_and_unknown_buses_are_not_removable() {
+    // Virtual disks (VHD / Storage Spaces) and anything unmapped must NOT be an
+    // eligible target — they map to Unknown → not a removable transport.
+    for bus_type in [0u32, 14, 15, 16, 18, 19, 20, 99] {
+        let bus = Bus::from_windows_bus_type(bus_type);
+        assert_eq!(bus, Bus::Unknown, "bus_type {bus_type}");
+        assert!(!bus.is_removable_transport(), "bus_type {bus_type}");
+    }
+    // And the removable ones are removable transports; the fixed ones are not.
+    assert!(Bus::from_windows_bus_type(7).is_removable_transport());
+    assert!(Bus::from_windows_bus_type(13).is_removable_transport());
+    assert!(!Bus::from_windows_bus_type(11).is_removable_transport()); // SATA
+    assert!(!Bus::from_windows_bus_type(17).is_removable_transport()); // NVMe
+}

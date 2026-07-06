@@ -49,6 +49,29 @@ impl Bus {
     pub fn is_removable_transport(self) -> bool {
         matches!(self, Bus::Usb | Bus::Mmc)
     }
+
+    /// Map a Windows `STORAGE_BUS_TYPE` value to a [`Bus`]. Pure — unit tested on
+    /// any host (the Windows enumeration feeds it the descriptor's `BusType`).
+    ///
+    /// Values are the `winioctl.h` `STORAGE_BUS_TYPE` constants (verified against
+    /// Microsoft Learn, *STORAGE_BUS_TYPE* — the enum is sequential from 0):
+    /// `BusTypeUsb = 7`, `BusTypeSd = 12`, `BusTypeMmc = 13`, `BusTypeSata = 11`,
+    /// `BusTypeAta = 3`, `BusTypeAtapi = 2`, `BusTypeNvme = 17`, `BusTypeScsi = 1`,
+    /// `BusTypeSas = 10`, `BusTypeRAID = 8`, `BusTypeiScsi = 9`. Anything not
+    /// mapped — including the **virtual** buses (`BusTypeVirtual = 14`,
+    /// `FileBackedVirtual = 15`, `Spaces = 16`) — is [`Bus::Unknown`], so it is
+    /// **not** a removable transport and can never be an eligible target.
+    #[must_use]
+    pub fn from_windows_bus_type(bus_type: u32) -> Bus {
+        match bus_type {
+            7 => Bus::Usb,               // BusTypeUsb
+            12 | 13 => Bus::Mmc,         // BusTypeSd | BusTypeMmc
+            2 | 3 | 11 => Bus::Sata,     // BusTypeAtapi | BusTypeAta | BusTypeSata
+            17 => Bus::Nvme,             // BusTypeNvme
+            1 | 8 | 9 | 10 => Bus::Scsi, // BusTypeScsi | RAID | iScsi | Sas
+            _ => Bus::Unknown,           // 1394/SSA/Fibre/Virtual/Spaces/SCM/UFS/Nvmeof/…
+        }
+    }
 }
 
 impl fmt::Display for Bus {

@@ -125,9 +125,15 @@ pub fn backend() -> Result<Box<dyn Backend>> {
     {
         Ok(Box::new(linux::LinuxBackend::new()))
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "windows")]
     {
-        // TODO(phase6/7): return the Windows/macOS backend once implemented.
+        // Enumeration + safe selection (SPEC-0009). Partitioning/writing land in
+        // later Phase 6 steps.
+        Ok(Box::new(windows::WindowsBackend::default()))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        // TODO(phase7): return the macOS backend once implemented.
         Err(crate::Error::Unsupported(
             "no device backend for this OS yet".to_owned(),
         ))
