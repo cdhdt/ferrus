@@ -110,6 +110,24 @@ Verified on the target host — **polkit `126`** (`pkexec --version`) — using 
   messages (the write action's message states it **erases all data**). Install path
   `/usr/libexec/ferrus-helper` (root-owned).
 
+### Helper resolution — installed path first (why the named action wins in prod)
+
+`resolve_helper_path()` returns the helper in a deliberate order:
+**`/usr/libexec/ferrus-helper` first**, then `$FERRUS_HELPER`, then a sibling of the
+current exe. In production the installed, root-owned helper exists, so it wins and
+`$FERRUS_HELPER` is **ignored** — a compromised environment cannot redirect the GUI
+to an arbitrary binary. Because the GUI then runs exactly
+`/usr/libexec/ferrus-helper` — the `exec.path` of the named actions — pkexec
+matches the **named** action (with its `auth_admin` and its "erases all data"
+message), not the permissive default action. In dev nothing is installed, so
+`/usr/libexec/ferrus-helper` is absent and `$FERRUS_HELPER` (the local build) is
+used; `make install` on a dev box would shadow it (secure), and `make uninstall`
+restores the dev workflow.
+
+`make install` installs the helper to precisely that path and the `.policy` next to
+it, so **install and policy `exec.path` stay in lockstep** — otherwise the named
+action would never match and pkexec would fall back to the default action.
+
 ## Progress streaming (NDJSON)
 
 The write is long (multi-GB), so the helper→GUI channel is **line-oriented
@@ -147,13 +165,33 @@ echo '{"target":"/dev/sdX","image":null,"tweaks":{"bypass_hardware":false,
 substitute `write` for `dry-run` and a real `target`/`image`. It streams
 `stage`/`advance`/`message` lines then a final `result`.
 
-From the GUI: launch `ferrus-gui` in a desktop session with a **polkit agent
-running** (it shows the password dialog). Point it at the helper via
-`FERRUS_HELPER=$PWD/target/debug/ferrus-helper ferrus-gui` for dev. A **fully
-clean** test (named actions, custom messages, argv1 binding) additionally requires
-installing the `.policy` to `/usr/share/polkit-1/actions/` and the helper to
-`/usr/libexec/ferrus-helper` (root-owned) — an explicit install step, not needed
-for the basic proof.
+From the GUI (dev): `FERRUS_HELPER=$PWD/target/debug/ferrus-helper ferrus-gui`, in
+a desktop session with a **polkit agent** running (it shows the password dialog).
+
+### Testing the NAMED polkit action (after a real install)
+
+This is the production path and needs root + a graphical session:
+
+```sh
+sudo make install
+ferrus-gui            # launched WITHOUT FERRUS_HELPER (installed helper wins)
+```
+
+Select a device + ISO, type the exact path to unlock, click **Write**, and read
+the polkit dialog. **How to tell which action fired:**
+
+- **Named action (correct):** the dialog shows Ferrus's own message — *"Authentication
+  is required for Ferrus to write to a device — THIS ERASES ALL DATA on it"* (or the
+  French translation). This proves `/usr/libexec/ferrus-helper` matched the
+  `io.github.cdhdt.ferrus.write` action via its `exec.argv1 = write`.
+- **Default action (wrong / not installed):** the dialog shows the generic pkexec
+  message — *"Authentication is required to run `/usr/libexec/ferrus-helper` as the
+  super user"* (action `org.freedesktop.policykit.exec`), with no Ferrus-specific
+  wording. Seeing this means the named action did not match — check that the helper
+  is installed at exactly the `.policy`'s `exec.path` and the `.policy` is in
+  `/usr/share/polkit-1/actions/`.
+
+`sudo make uninstall` removes everything and returns to the dev workflow.
 
 ## Type-to-confirm (GUI, before ANY elevation)
 

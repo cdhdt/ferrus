@@ -69,6 +69,30 @@ Run the CLI (a real `--dry-run` is available from the start):
 cargo run -p ferrus-cli -- --help
 ```
 
+## Installation
+
+A plain install target (not distro packaging) sets Ferrus up the way an end user
+runs it — the GUI unprivileged, elevating a small **root-owned helper** through
+**named polkit actions**:
+
+```sh
+sudo make install      # release build + install; sudo make uninstall to remove
+```
+
+It installs:
+
+- `ferrus` and `ferrus-gui` → `/usr/bin/`
+- `ferrus-helper` → `/usr/libexec/` (root-owned; this path is the `exec.path` of
+  the polkit actions — they must match)
+- the polkit actions → `/usr/share/polkit-1/actions/`
+- two desktop entries → `/usr/share/applications/`: **Ferrus** and **Ferrus
+  (software rendering)** (the latter forces CPU rendering — see Troubleshooting)
+
+Once installed, `ferrus-gui` uses the installed helper (and its named polkit
+action) — `$FERRUS_HELPER` is ignored for safety. For development, don't install;
+point the GUI at your build with `FERRUS_HELPER=target/debug/ferrus-helper
+cargo run -p ferrus-gui`.
+
 ## Safety
 
 Ferrus erases block devices. It refuses to touch non-removable devices or the

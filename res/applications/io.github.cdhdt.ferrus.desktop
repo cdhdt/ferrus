@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Ferrus
+GenericName=Bootable USB Creator
+Comment=Create bootable USB media — write any ISO, or a Windows install stick with Rufus-style tweaks
+Exec=ferrus-gui
+Icon=drive-removable-media
+Terminal=false
+Categories=Utility;
+Keywords=USB;ISO;bootable;Windows;Rufus;flash;

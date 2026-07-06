@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Ferrus (software rendering)
+GenericName=Bootable USB Creator
+Comment=Ferrus with CPU (tiny-skia) rendering — use this if text looks corrupted on your GPU
+Exec=env ICED_BACKEND=tiny-skia ferrus-gui
+Icon=drive-removable-media
+Terminal=false
+Categories=Utility;
+Keywords=USB;ISO;bootable;Windows;Rufus;flash;software;

@@ -253,16 +253,28 @@ pub fn serve_write(request: &Request, out: impl Write) -> bool {
 
 // --- client side (used by the unprivileged GUI) ---------------------------
 
-/// Resolve the helper binary: `$FERRUS_HELPER`, else `/usr/libexec/ferrus-helper`,
-/// else a sibling of the current executable (dev layout).
+/// Resolve the helper binary, **installed path first** (SPEC-0008).
+///
+/// Priority is deliberate and security-relevant:
+/// 1. `/usr/libexec/ferrus-helper` — the installed, root-owned helper. In
+///    production it exists and its path is exactly the `exec.path` locked into the
+///    **named** polkit actions, so a compromised environment **cannot** redirect
+///    the GUI to an arbitrary binary via `$FERRUS_HELPER` (which is ignored here).
+/// 2. `$FERRUS_HELPER` — dev override, consulted **only** when nothing is
+///    installed (in dev the helper is not in a system path).
+/// 3. a sibling of the current executable (`target/debug/ferrus-helper`).
+///
+/// Note: if a developer has *also* run `make install`, the installed helper
+/// shadows `$FERRUS_HELPER` (the secure behavior); `make uninstall` returns to the
+/// dev workflow.
 #[must_use]
 pub fn resolve_helper_path() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("FERRUS_HELPER") {
-        return Some(PathBuf::from(path));
-    }
     let installed = PathBuf::from("/usr/libexec/ferrus-helper");
     if installed.exists() {
         return Some(installed);
+    }
+    if let Some(path) = std::env::var_os("FERRUS_HELPER") {
+        return Some(PathBuf::from(path));
     }
     let sibling = std::env::current_exe()
         .ok()?
