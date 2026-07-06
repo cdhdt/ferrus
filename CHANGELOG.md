@@ -12,6 +12,19 @@ unit tests only.
 
 ### Added
 
+- **Privileged helper + polkit elevation + type-to-confirm** (Phase 5b-1;
+  SPEC-0008). New `ferrus-helper` crate — the only privileged component — a thin,
+  re-validating shell over `ferrus-core`, elevated via `pkexec`. The GUI (always
+  unprivileged) sends a typed JSON request on **stdin** (so a password never
+  touches argv/env), and the helper **re-validates everything as root**
+  (re-enumerate + `SafeTarget::acquire` — it never trusts the GUI's proposed
+  device), asserts it is actually root, and runs a **forced dry-run** (no write is
+  possible in this sub-phase). Before any elevation the GUI requires a
+  **type-to-confirm**: the exact target path must be typed, or the action stays
+  disabled (re-blocked when the device changes). Ships a polkit `.policy`
+  (`res/polkit/`, format verified against the local polkit 126). Real write +
+  progress streaming are deferred to 5b-2. No `unsafe`.
+
 - **Preliminary Windows-media detection** (`source::inspect_iso_kind`, wired into
   the GUI). At ISO selection the GUI now guesses Windows vs generic media
   **unprivileged and without mounting**, to gate the Windows tweaks. Established

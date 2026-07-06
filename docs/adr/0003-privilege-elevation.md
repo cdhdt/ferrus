@@ -50,4 +50,9 @@ system/critical" guard.
   the Phase 5 helper process can be slotted in without reworking call sites.
 - The single safety checkpoint (`device::SafeTarget::acquire`) must run on the
   privileged side in both stages, so elevation can never bypass the guards.
-- Revisit the helper design alongside the GUI work (ADR-0001, egui).
+- Revisit the helper design alongside the GUI work (ADR-0001, iced).
+
+**Update (Phase 5b-1):** Option B is now implemented — `ferrus-helper`, elevated
+via `pkexec`, re-runs `SafeTarget::acquire` on the root side and never trusts the
+GUI's proposed device. See SPEC-0008. Phase 5b-1 restricts the helper to a forced
+dry-run; the real write follows in 5b-2.

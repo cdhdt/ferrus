@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  Ferrus polkit action for the privileged helper (SPEC-0008).
+
+  Install:
+    - the helper binary at  /usr/libexec/ferrus-helper  (root-owned, 0755)
+    - this file at          /usr/share/polkit-1/actions/
+
+  Format verified against the local polkit (v126) and a real installed action
+  (com.ubuntu.pkexec.gdebi-gtk.policy). The exec.argv1 annotation binds this
+  action to the single `dry-run` subcommand (Phase 5b-1); the real-write action
+  is added in Phase 5b-2.
+-->
+<policyconfig>
+
+  <action id="io.github.cdhdt.ferrus.prepare">
+    <message>Authentication is required for Ferrus to prepare a USB device</message>
+    <message xml:lang="fr">Authentification requise pour préparer un périphérique USB avec Ferrus</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/ferrus-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">dry-run</annotate>
+  </action>
+
+</policyconfig>
