@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  Ferrus polkit actions for the privileged helper (SPEC-0008).
+
+  One action per subcommand, each bound to its exec.argv1 — the idiomatic
+  structure for pkexec: per pkexec(1), "If the org.freedesktop.policykit.exec.argv1
+  annotation is present, the action will only be picked if the first argument to
+  the program matches the value". So `pkexec ferrus-helper dry-run` selects the
+  dryrun action and `pkexec ferrus-helper write` selects the write action, each
+  with its own message. Both require auth_admin. Format verified against the local
+  polkit (v126) and a real installed action (com.ubuntu.pkexec.gdebi-gtk.policy).
+
+  Install:
+    - helper binary at  /usr/libexec/ferrus-helper  (root-owned, 0755)
+    - this file at       /usr/share/polkit-1/actions/
+-->
+<policyconfig>
+
+  <action id="io.github.cdhdt.ferrus.dryrun">
+    <message>Authentication is required for Ferrus to simulate preparing a device (dry run — nothing is written)</message>
+    <message xml:lang="fr">Authentification requise pour que Ferrus simule la préparation d'un périphérique (essai — rien n'est écrit)</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/ferrus-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">dry-run</annotate>
+  </action>
+
+  <action id="io.github.cdhdt.ferrus.write">
+    <message>Authentication is required for Ferrus to write to a device — THIS ERASES ALL DATA on it</message>
+    <message xml:lang="fr">Authentification requise pour que Ferrus écrive sur un périphérique — CECI EFFACE TOUTES SES DONNÉES</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/ferrus-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">write</annotate>
+  </action>
+
+</policyconfig>

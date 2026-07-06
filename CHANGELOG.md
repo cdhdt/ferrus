@@ -10,6 +10,21 @@ unit tests only.
 
 ## [Unreleased]
 
+### Added
+
+- **Real write from the GUI + live progress streaming (Phase 5b-2).** The GUI can
+  now actually write a device (still **never** as root). A new `write` helper
+  subcommand runs the engine destructively (`dry_run = false`), alongside the
+  existing `dry-run`. Destructiveness is chosen by the **subcommand**, never by
+  request data — there is no `dry_run` field; each verb passes a literal, and
+  `write` is a separate `auth_admin` polkit action. The helper streams **NDJSON**
+  progress events and the GUI shows a **live progress bar** (consumed as an async
+  iced `Task` stream — the UI never blocks). Root-side re-validation
+  (`SafeTarget::acquire`) and type-to-confirm are unchanged and apply to the write.
+  polkit ships two actions (`…ferrus.dryrun` / `…ferrus.write`), the write one
+  labelled as erasing all data (SPEC-0008). No `unsafe`; the core destructive
+  pipeline (validated on real hardware in Phases 2–4) is unmodified.
+
 ### Changed
 
 - **Helper bounds its stdin read.** The privileged helper reads the JSON request
