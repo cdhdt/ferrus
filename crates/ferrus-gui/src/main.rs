@@ -392,7 +392,7 @@ impl Ferrus {
     fn view(&self) -> Element<'_, Message> {
         let header = column![
             text("Ferrus").size(30),
-            text("Dry run — no data will be written (Phase 5a).").size(14),
+            text("Write real install media, or simulate a dry run.").size(14),
         ]
         .spacing(4);
 
